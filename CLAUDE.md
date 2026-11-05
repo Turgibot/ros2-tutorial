@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Planning stage. The repo holds only `PLAN.md` (course outline and decisions), `README.md`, and a Docker launch script. There is no build system, linter, or test suite yet. `lessons/` and `code/` (below) do not exist yet.
+Planning and environment stage. The repo holds `PLAN.md` (course outline, decisions, and the environment test results), `README.md`, `docker/` (Dockerfile and run script) and `scripts/check_machine.sh`. There are no lessons yet, and no lint or test suite. `lessons/` and `code/` (below) do not exist yet.
 
 ## What this is
 
@@ -19,8 +19,11 @@ Lesson rules: every lesson follows Goal / Concepts / Do it / Check / Exercise (a
 
 ## Running the environment
 
-`docker/run_ros2.sh [cmd...]` opens a shell (or runs the given command, e.g. `docker/run_ros2.sh ros2 topic list`) in `ros:jazzy-ros-base` on the host network, with `ROS_DOMAIN_ID` (default 0) and the repo mounted read-write at `/workspace`.
+- `scripts/check_machine.sh`: checks the host (OS, CPU, RAM, disk, Docker, display/GPU, network) and, if the image exists, the image (Kinova packages, Gazebo, container-to-container DDS, an RViz window). Exit code 1 on any FAIL. Keep it in step with the Dockerfile and run script.
+- `docker build -t ros2-tutorial:jazzy docker/`: builds the course image (ROS 2 Jazzy + Gazebo Harmonic + MoveIt 2 + `ros2_kortex` `jazzy` branch in `/opt/kortex_ws`). About 8.65 GB; the colcon step takes a few minutes.
+- `docker/run_ros2.sh [cmd...]`: shell (or the given command, e.g. `docker/run_ros2.sh ros2 topic list`) in that image, host network, `ROS_DOMAIN_ID` (default 0), repo mounted read-write at `/workspace`, X display and NVIDIA GPU passed through when available. Sources both `/opt/ros/jazzy` and `/opt/kortex_ws`.
 
-Non-obvious constraints in the script (keep them when editing):
+Non-obvious constraints (keep them when editing):
 - `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` and `RMW_IMPLEMENTATION=rmw_fastrtps_cpp`: the default shared-memory transport cannot cross container boundaries (topics are listed but no data arrives).
-- The script does not yet pass an X display, so GUI tools (RViz, Gazebo) will need that added when the lessons reach them.
+- `packages.ros.org` answers on plain `http://` only.
+- Gazebo sim: `ros2 launch kortex_bringup kortex_sim_control.launch.py sim_gazebo:=true gripper:=robotiq_2f_85 use_sim_time:=true launch_rviz:=false`. The `gripper` default is empty (no gripper), and the gripper action type is `ParallelGripperCommand`, not `GripperCommand`. The launch hardcodes the Gazebo GUI, so it needs a display. Details in PLAN.md, "Environment test results".
