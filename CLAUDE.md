@@ -10,10 +10,18 @@ Planning and environment stage. The repo holds `PLAN.md` (course outline, decisi
 
 A hands-on course for ROS 2 (Jazzy) and the Kinova Gen3 7-DoF arm, meant to be shared with colleagues. Simulation uses ROS 2 tools only (ros2_control mock components + RViz, Gazebo Harmonic via `ros_gz`); Isaac Sim was dropped from scope. `PLAN.md` is the source of truth for lesson order, scope and rules. Read it before adding content.
 
-Planned layout (from PLAN.md):
-- `lessons/NN-name.html`: static, self-contained HTML lessons (no external dependencies)
+Layout:
+- `lessons/`: the static website. `index.html` (contents), one file per lesson (`a0-environment.html` exists so far), `assets/style.css`, `assets/lesson.js`, `img/` for screenshots. No build step, no external dependencies; preview by opening the file in a browser.
 - `code/NN-name/`: runnable code for each lesson
 - Parts: A (ROS 2 basics), B (Kinova Gen3, MoveIt 2), C (simulation with Gazebo), D (symbols to motion), E (optional: the GR-Blocks paper on robots)
+
+Writing a lesson (follow `lessons/a0-environment.html` as the template):
+- Command blocks are `<pre class="cmd"><code>...</code></pre>`; `lesson.js` adds the Copy button, so put only what the reader should paste in them (no `$` prompt). Output is `<pre class="out">`, which has no button. Escape `<`, `>`, `&` in HTML.
+- ROS 2 work happens in a container shell: tell the reader to open a new terminal, run `docker/run_ros2.sh` (no arguments) and type the commands at that prompt. Do not write one-shot `docker/run_ros2.sh ros2 ...` commands in lessons. Use a new `host` block for the shell start, then `container` blocks.
+- Mark where each command runs with `<span class="where host">host</span>` or `<span class="where box">container</span>`.
+- Expected output and screenshots must come from real runs, not be written from memory. `scripts/screenshot_window.py <title-substring> <out.png>` saves one X window (not the desktop) as a PNG into `lessons/img/`. Say so to the user when a block was not run (A0: Docker install, `usermod`, NVIDIA toolkit, `git clone` of the public repo).
+- Each lesson ends with a pager: link back to the contents, and a link to the next lesson once it exists (a dashed "coming soon" box until then; update the previous lesson's pager when adding a lesson, and the status in `index.html`).
+- Check a page by rendering it with `google-chrome --headless=new --screenshot=...`.
 
 Lesson rules: every lesson follows Goal / Concepts / Do it / Check / Exercise (answer at the bottom) / Recap. One new idea at a time, nothing used before it is taught, every number/formula shown. Pace is one lesson at a time: the author runs it and reports back before the next is written. Commands in a lesson must be run and verified before handing over.
 

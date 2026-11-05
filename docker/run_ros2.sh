@@ -23,7 +23,10 @@ GPU=(); if docker info 2>/dev/null | grep -qi nvidia; then GPU=(--gpus all -e NV
 
 # FASTDDS_BUILTIN_TRANSPORTS=UDPv4: the default shared-memory transport cannot cross container boundaries
 # (topics are listed but no data arrives), so force UDP.
+# Run as your own user, so files created in /workspace (builds, new packages) belong to you, not to root.
+# HOME=/tmp gives ROS and Gazebo a writable home (logs, caches); it is discarded with the container.
 exec docker run "${TTY[@]}" --rm --network=host "${GUI[@]}" "${GPU[@]}" \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -e ROS_DOMAIN_ID="$DOMAIN" \
   -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
   -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \

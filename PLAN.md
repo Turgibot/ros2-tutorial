@@ -5,7 +5,10 @@ A hands-on course for people new to ROS 2 and the Kinova Gen3 arm, meant to be s
 ## Decisions
 - Scope: general ROS 2, with two Kinova Gen3 (7-DoF) arms in a ROS 2 simulation as the capstone. The GR-Blocks paper
   (goal recognition + helpful R_ing) becomes an optional last part, not the spine.
-- Format: static, self-contained HTML lessons (like GR-Blocks): `lessons/NN-name.html`, runnable code in `code/NN-name/`.
+- Format: a static website in `lessons/` (open `lessons/index.html`, or host the folder anywhere). One HTML file per
+  lesson (`a0-environment.html`, ...), each linking to the previous and next lesson, with shared `assets/style.css`
+  and `assets/lesson.js` (copy button on every command block) and screenshots in `img/`. No build step, no external
+  dependencies. Runnable code in `code/NN-name/`.
 - From scratch: the course covers every step needed to reproduce the setup on a clean machine (install Docker, build
   the image, build the Kinova workspace, run the sim). Nothing is assumed, and every setup problem we hit is documented
   with its fix.
