@@ -325,6 +325,21 @@ ros2 pkg prefix kortex_bringup</code></pre>
 <pre class="out">/parameter_events
 /rosout</pre>
 <p>Only the two built-in topics appear, because nothing else is running. The next step creates a third. Leave this shell open.</p>
+<h4>Look inside the Kinova workspace</h4>
+<p>The image build compiled the Kinova software. Look at what it left behind:</p>
+<pre class="cmd"><code>ls /opt/kortex_ws</code></pre>
+<pre class="out">build
+install
+log
+src</pre>
+<p>This is what every <code>colcon build</code> creates, and you will see it again in your own code:</p>
+<ul>
+<li><code>src</code>: the source code that was downloaded (<code>ros2_kortex</code> and its dependencies). This is where code you write or edit lives.</li>
+<li><code>build</code>: scratch files of the compiler. Safe to delete; it only makes the next build slower.</li>
+<li><code>install</code>: the finished, runnable result. This is the folder that <code>setup.bash</code> (sourced for you by the run script) points ROS 2 at.</li>
+<li><code>log</code>: the compiler output of each build, useful when a build fails.</li>
+</ul>
+<p>Lesson A1 builds a small program of your own and shows where its files land.</p>
 <div class="callout"><strong class="t">Shortcut</strong>
 The run script can also run one command without opening a shell: everything after the script name is the command, for example <code>docker/run_ros2.sh ros2 topic list</code>. The course does not use this form, but it is handy in scripts.</div>
 </li>

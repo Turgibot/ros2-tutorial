@@ -1,0 +1,6 @@
+# Request: an action to check
+SymbolicAction action
+---
+# Response: is it well formed, and why not
+bool valid
+string reason

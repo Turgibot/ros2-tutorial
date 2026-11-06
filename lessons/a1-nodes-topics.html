@@ -144,6 +144,7 @@ int main(int argc, char ** argv)
 <li>Our class <code>Talker</code> is a <code>Node</code>. <code>Node("talker")</code> gives it the name <code>talker</code>.</li>
 <li><code>create_publisher&lt;std_msgs::msg::String&gt;("chatter", 10)</code> declares: this node publishes <code>String</code> messages on the topic <code>chatter</code> (shown as <code>/chatter</code>). The <code>10</code> is how many unsent messages may wait in a queue if the receiver is slow. The message type comes from the header <code>std_msgs/msg/string.hpp</code>.</li>
 <li><code>create_wall_timer(500ms, ...)</code> calls <code>tick</code> every 500 milliseconds. The <code>[this]() { tick(); }</code> part is a small unnamed function (a <em>lambda</em>) that calls our method.</li>
+<li>Why are <code>pub_</code> and <code>timer_</code> stored as members (the two lines at the bottom of the class)? <code>create_publisher</code> and <code>create_wall_timer</code> return a <em>handle</em>, and in C++ the publisher or timer lives only as long as something holds that handle. We tested it: with <code>timer_ =</code> removed, so that the handle is thrown away, the talker compiles and starts but never publishes anything. Keep every handle you create in a member variable. (Python does this for you inside the node, which is why <code>talker.py</code> does not store them.)</li>
 <li><code>RCLCPP_INFO(get_logger(), "sent: %s", ...)</code> prints a log line. <code>%s</code> is replaced by the text that follows.</li>
 <li><code>rclcpp::spin(...)</code> keeps the program alive and runs the timer. Without it the program would end immediately.</li>
 </ul>
@@ -229,9 +230,32 @@ colcon build</code></pre>
 Finished &lt;&lt;&lt; a1_nodes_topics [4.07s]
 
 Summary: 1 package finished [4.12s]</pre>
-<p>Then <em>source</em> the result (A0 explained sourcing: it tells the shell where to find the new program) and run the talker with <code>ros2 run &lt;package&gt; &lt;program&gt;</code>:</p>
+<p>The build added three folders next to your source files (the same <code>build</code>, <code>install</code> and <code>log</code> you saw in <code>/opt/kortex_ws</code> in A0):</p>
+<pre class="cmd"><code>ls
+ls install/a1_nodes_topics/lib/a1_nodes_topics</code></pre>
+<pre class="out">CMakeLists.txt  build  install  log  package.xml  src
+listener  talker</pre>
+<p>The compiled programs <code>talker</code> and <code>listener</code> are in <code>install/a1_nodes_topics/lib/a1_nodes_topics/</code>. That path is <code>install/&lt;package&gt;/lib/&lt;package&gt;/</code>, and <code>ros2 run &lt;package&gt; &lt;program&gt;</code> looks exactly there. Your <code>.cpp</code> files are untouched: the build never changes source.</p>
+<p>ROS 2 does not know about the new package yet. Try:</p>
+<pre class="cmd"><code>ros2 pkg prefix a1_nodes_topics</code></pre>
+<pre class="out">Package not found</pre>
+<p>Now <em>source</em> the result (A0 explained sourcing: it tells the shell where to find the new program), ask again, and run the talker with <code>ros2 run &lt;package&gt; &lt;program&gt;</code>:</p>
 <pre class="cmd"><code>source install/setup.bash
+ros2 pkg prefix a1_nodes_topics
 ros2 run a1_nodes_topics talker</code></pre>
+<p>The first line printed is the install folder of your package, <code>/workspace/code/01-nodes-topics/cpp/install/a1_nodes_topics</code>: sourcing made ROS 2 aware of it. The talker's output follows, below.</p>
+<details>
+<summary>Optional: what is a "prefix"?</summary>
+<p>A <strong>prefix</strong> is the root folder a package was installed into: the folder that holds that package's <code>lib/</code>, <code>share/</code> and <code>include/</code> folders. The word comes from the Unix idea of an installation prefix such as <code>/usr</code>. <code>ros2 pkg prefix &lt;package&gt;</code> prints it. Three examples from the course container:</p>
+<table>
+<tr><th>Command</th><th>Prefix printed</th></tr>
+<tr><td><code>ros2 pkg prefix rclcpp</code></td><td><code>/opt/ros/jazzy</code></td></tr>
+<tr><td><code>ros2 pkg prefix kortex_bringup</code></td><td><code>/opt/kortex_ws/install/kortex_bringup</code></td></tr>
+<tr><td><code>ros2 pkg prefix a1_nodes_topics</code></td><td><code>/workspace/code/01-nodes-topics/cpp/install/a1_nodes_topics</code></td></tr>
+</table>
+<p>Ready-made (apt) packages all share one prefix, <code>/opt/ros/jazzy</code>. A package built with <code>colcon</code> gets its own prefix, <code>install/&lt;package&gt;</code>. ROS 2 finds prefixes through a list of folders called <code>AMENT_PREFIX_PATH</code>, which <code>setup.bash</code> files add to. So the command also answers "does this shell know the package at all?": <code>Package not found</code> means the package's <code>setup.bash</code> has not been sourced in this shell.</p>
+<p>Related: <code>ros2 pkg prefix --share rclcpp</code> prints the package's <code>share</code> folder, <code>/opt/ros/jazzy/share/rclcpp</code>, where its data files live.</p>
+</details>
 </div>
 <pre class="out">[INFO] [1793885463.163031377] [talker]: sent: hello 0
 [INFO] [1793885463.656693945] [talker]: sent: hello 1
@@ -391,7 +415,7 @@ Could not determine the type for the passed topic</pre>
 
 <nav class="pager">
 <a href="a0-environment.html"><small>Previous</small>A0 · The course environment</a>
-<span class="soon next"><small>Next</small>A2 · Messages and services (coming soon)</span>
+<a class="next" href="a2-messages-services.html"><small>Next</small>A2 · Messages and services</a>
 </nav>
 </main>
 <footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>

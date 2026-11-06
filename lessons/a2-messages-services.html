@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A2 · Messages and services</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A2 · Messages and services</h1>
+<p class="lead">Define your own message type, then build a service that answers questions about it.</p>
+
+<h2>Before we start: the scenario</h2>
+<p>The course ends with a robot arm that rearranges <strong>lettered blocks</strong> on a table. The blocks are cubes labelled with letters (<code>F</code>, <code>W</code>, ...) and can be stacked into towers. We do not tell the arm joint angles. We tell it <strong>symbolic actions</strong>: short commands about blocks, such as <code>unstack F W</code>. The arm turns each one into motion. Later lessons build that. This lesson only prepares the vocabulary, so you need to know the four actions:</p>
+<table>
+<tr><th>Action</th><th>Meaning</th><th>Needs</th></tr>
+<tr><td><code>pickup X</code></td><td>Take block <code>X</code> from the table and hold it.</td><td>1 block</td></tr>
+<tr><td><code>putdown X</code></td><td>Put the block you are holding, <code>X</code>, down on the table.</td><td>1 block</td></tr>
+<tr><td><code>stack X Y</code></td><td>Put the block you are holding, <code>X</code>, on top of block <code>Y</code>.</td><td>2 blocks</td></tr>
+<tr><td><code>unstack X Y</code></td><td>Take block <code>X</code>, which is on top of block <code>Y</code>, off the tower and hold it.</td><td>2 blocks</td></tr>
+</table>
+<p>The rules of this little world: the arm holds <strong>one block at a time</strong>, and it can only move a block that has nothing on top of it. So in the picture, <code>F</code> is on <code>W</code>, and <code>unstack F W</code> lifts <code>F</code> off and leaves <code>W</code> alone on the table. <code>stack F W</code> would do the reverse.</p>
+<figure>
+<svg viewBox="0 0 700 220" role="img" aria-label="Diagram of unstack F W. Before: block F sits on top of block W on the table, and a two-finger gripper above them is open and empty. After: block W is alone on the table and the gripper, its two fingers closed on the sides of the block, holds block F above it.">
+<defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+<style>svg text{fill:var(--fg);font:14px system-ui,sans-serif} svg .m{fill:var(--muted);font-size:12px} svg .b{font-weight:700} svg .k{font:700 20px system-ui,sans-serif}</style>
+<text x="30" y="24" class="m b">BEFORE</text>
+<rect x="30" y="180" width="200" height="8" fill="var(--line)"/><text x="130" y="206" text-anchor="middle" class="m">table</text>
+<rect x="100" y="130" width="60" height="50" fill="var(--out-bg)" stroke="var(--fg)"/><text x="130" y="163" text-anchor="middle" class="k">W</text>
+<rect x="100" y="80" width="60" height="50" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="130" y="113" text-anchor="middle" class="k">F</text>
+<g fill="var(--muted)"><rect x="127" y="40" width="6" height="14"/><rect x="94" y="54" width="72" height="7" rx="2"/><rect x="94" y="54" width="8" height="24" rx="3"/><rect x="158" y="54" width="8" height="24" rx="3"/></g>
+<text x="176" y="48" class="m">gripper (open, empty)</text>
+<path d="M270 120 H430" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar2)"/>
+<text x="350" y="110" text-anchor="middle" class="b">unstack F W</text>
+<text x="470" y="24" class="m b">AFTER</text>
+<rect x="470" y="180" width="200" height="8" fill="var(--line)"/><text x="570" y="206" text-anchor="middle" class="m">table</text>
+<rect x="540" y="130" width="60" height="50" fill="var(--out-bg)" stroke="var(--fg)"/><text x="570" y="163" text-anchor="middle" class="k">W</text>
+<rect x="540" y="56" width="60" height="50" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="570" y="89" text-anchor="middle" class="k">F</text>
+<g fill="var(--muted)"><rect x="567" y="36" width="6" height="14"/><rect x="534" y="50" width="72" height="7" rx="2"/><rect x="534" y="50" width="6" height="40" rx="3"/><rect x="600" y="50" width="6" height="40" rx="3"/></g>
+<text x="570" y="124" text-anchor="middle" class="m">gripper holds F</text>
+</svg>
+<figcaption>Before and after <code>unstack F W</code>.</figcaption>
+</figure>
+<p>To send such a command between programs, ROS 2 needs a message that can hold it, and a way to ask "is this a valid action?". That is what this lesson builds.</p>
+
+<h2>1. Goal</h2>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>defined a message, <code>SymbolicAction</code>, that holds an action such as <code>unstack F W</code>, and a service, <code>CheckAction</code>, that says whether such an action is well formed,</li>
+<li>built them into a package and inspected them with <code>ros2 interface</code>,</li>
+<li>sent your message on a topic from the command line,</li>
+<li>started a service <strong>server</strong> and called it from the command line and from a <strong>client</strong> program.</li>
+</ul>
+<p>Here we only teach the tools, with a tiny checker; the arm itself comes later.</p>
+
+<h2>2. Concepts</h2>
+<h3>Interfaces: message, service</h3>
+<p>In A1 we used a ready-made message, <code>std_msgs/msg/String</code>. Its definition is one line, <code>string data</code>. You can define your own the same way, in a small text file. Such definitions are called <strong>interfaces</strong>: the agreement between programs about what they exchange. Two programs can only talk if both build their data from the same definition, which is why it is called an interface (the meeting point between them), and why it lives in a file of its own. There are two kinds you need now:</p>
+<ul>
+<li>a <strong>message</strong> (<code>.msg</code> file): a list of fields, each with a type and a name. It is sent on a topic.</li>
+<li>a <strong>service</strong> (<code>.srv</code> file): a <em>request</em> and a <em>response</em>, separated by a line with three dashes (<code>---</code>). A service is an interface too, because a client and a server must agree on both parts: what the question contains and what the answer contains. The build turns the two halves into two message types, <code>CheckAction_Request</code> and <code>CheckAction_Response</code> (you will see these names in the output below).</li>
+</ul>
+<p>Field types include <code>bool</code>, <code>int32</code>, <code>float64</code>, <code>string</code>, another message (like <code>SymbolicAction</code> inside our service), and lists of these, written with <code>[]</code> (<code>string[]</code> is a list of strings).</p>
+<p>When you build a package that contains such files, ROS 2 <em>generates</em> Python and C++ code for them. That is why the same interface can be used from both languages, and from programs written by different people.</p>
+
+<h3>Topic or service?</h3>
+<p>A <strong>topic</strong> is a continuous one-way stream: the publisher sends whenever it likes and does not wait for anyone. A <strong>service</strong> is a question and an answer: a <strong>client</strong> sends one request, the <strong>server</strong> computes and sends one response, and the client waits for it. Use a topic for data that keeps flowing (joint positions). Use a service for a short question that needs an answer (is this action valid?). Something that takes a long time and needs progress updates is neither: that is an <em>action</em>, lesson A3.</p>
+<figure>
+<svg viewBox="0 0 700 190" role="img" aria-label="Diagram. Top: a publisher sends messages one way on a topic to a subscriber. Bottom: a service client sends a request to a service server, which sends back a response.">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+<style>svg text{fill:var(--fg);font:14px system-ui,sans-serif} svg .m{fill:var(--muted);font-size:12px} svg .b{font-weight:700}</style>
+<text x="20" y="22" class="m b">TOPIC: one way, no waiting</text>
+<rect x="20" y="34" width="150" height="46" rx="23" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="95" y="62" text-anchor="middle" class="b">publisher</text>
+<rect x="530" y="34" width="150" height="46" rx="23" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="605" y="62" text-anchor="middle" class="b">subscriber</text>
+<path d="M170 57 H528" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+<text x="350" y="50" text-anchor="middle" class="m">message, message, message ...</text>
+<text x="20" y="112" class="m b">SERVICE: a question and an answer</text>
+<rect x="20" y="124" width="150" height="46" rx="23" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="95" y="152" text-anchor="middle" class="b">client</text>
+<rect x="530" y="124" width="150" height="46" rx="23" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="605" y="152" text-anchor="middle" class="b">server</text>
+<path d="M170 138 H528" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+<text x="350" y="132" text-anchor="middle" class="m">request</text>
+<path d="M528 158 H172" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+<text x="350" y="178" text-anchor="middle" class="m">response</text>
+</svg>
+<figcaption>A topic streams. A service answers.</figcaption>
+</figure>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <strong>container shell</strong> (A0, step 5). You will use two terminals, called 1 and 2. The code is in <code>code/02-messages-services/</code>. Use the <strong>Python / C++</strong> switch at the top right to choose your language. The interfaces are the same for both.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Read the interfaces</h3>
+<p>The interfaces live in their own package, <code>code/02-messages-services/interfaces/</code>. Here is the message, <code>msg/SymbolicAction.msg</code>:</p>
+<pre class="src" data-file="code/02-messages-services/interfaces/msg/SymbolicAction.msg"><code># One symbolic action, for example: unstack F W
+string name        # the action: pickup, putdown, stack or unstack
+string[] args      # the blocks it applies to, for example [F, W]</code></pre>
+<p>Two fields: the action's <code>name</code> (<code>unstack</code>) and a list of strings, <code>args</code> (<code>[F, W]</code>). Everything after <code>#</code> is a comment. The file name, <code>SymbolicAction</code>, becomes the type name, so it must start with a capital letter. And this is the service, <code>srv/CheckAction.srv</code>:</p>
+<pre class="src" data-file="code/02-messages-services/interfaces/srv/CheckAction.srv"><code># Request: an action to check
+SymbolicAction action
+---
+# Response: is it well formed, and why not
+bool valid
+string reason</code></pre>
+<p>The request is one <code>SymbolicAction</code> (our message, used as a field type). The response has two fields: <code>valid</code> (yes or no) and <code>reason</code> (a sentence).</p>
+<p>The package also needs two small files that say what to generate. You do not need to change them now, lesson A4 explains packages. <code>CMakeLists.txt</code> lists the interface files:</p>
+<pre class="src" data-file="code/02-messages-services/interfaces/CMakeLists.txt, the important part"><code>rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/SymbolicAction.msg"
+  "srv/CheckAction.srv"
+  DEPENDENCIES   # srv/CheckAction.srv uses the message above, which lives in this same package
+)</code></pre>
+<p>and <code>package.xml</code> gives the package its name, <code>a2_interfaces</code>.</p>
+</li>
+
+<li>
+<h3>Build the interfaces</h3>
+<p><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Build everything in this lesson's folder, and source the result (as in A1, sourcing tells the shell about the new package):</p>
+<pre class="cmd"><code>cd code/02-messages-services
+colcon build
+source install/setup.bash</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; a2_interfaces
+Finished &lt;&lt;&lt; a2_interfaces [2.97s]
+Starting &gt;&gt;&gt; a2_services
+Finished &lt;&lt;&lt; a2_services [2.44s]
+
+Summary: 2 packages finished [5.46s]</pre>
+<p>Two packages were built: <code>a2_interfaces</code> (our message and service) and <code>a2_services</code> (the C++ programs, built even if you use Python). The times will differ. Python programs need no build themselves, but they need the generated interface code, which is why the build comes first.</p>
+
+<h4>What did the build create, and where?</h4>
+<p>Look at the folder you built in:</p>
+<pre class="cmd"><code>ls
+ls install
+ls install/a2_interfaces</code></pre>
+<pre class="out">build  cpp  install  interfaces  log  py
+COLCON_IGNORE  _local_setup_util_ps1.py  _local_setup_util_sh.py  a2_interfaces  a2_services  local_setup.bash  local_setup.ps1  local_setup.sh  local_setup.zsh  setup.bash  setup.ps1  setup.sh  setup.zsh
+include  lib  share</pre>
+<p>Three new folders appeared next to your source (<code>cpp</code>, <code>interfaces</code>, <code>py</code>), as in A0 and A1:</p>
+<ul>
+<li><code>build/</code>: the compiler's scratch files. Safe to delete.</li>
+<li><code>install/</code>: the result. It has one folder per package, plus the <code>setup.bash</code> you just sourced.</li>
+<li><code>log/</code>: the output of each build, to read when a build fails.</li>
+</ul>
+<p>Inside <code>install/&lt;package&gt;/</code> the files are sorted by kind. For this lesson:</p>
+<table>
+<tr><th>What</th><th>Where</th></tr>
+<tr><td>C++ programs (<code>server</code>, <code>client</code>)</td><td><code>install/a2_services/lib/a2_services/</code></td></tr>
+<tr><td>Generated Python code for the message and service</td><td><code>install/a2_interfaces/lib/python3.12/site-packages/a2_interfaces/</code></td></tr>
+<tr><td>Generated C++ headers (such as <code>check_action.hpp</code>)</td><td><code>install/a2_interfaces/include/a2_interfaces/</code></td></tr>
+<tr><td>Generated C++ libraries (<code>liba2_interfaces__*.so</code>)</td><td><code>install/a2_interfaces/lib/</code></td></tr>
+<tr><td>Copies of your <code>.msg</code> and <code>.srv</code> files</td><td><code>install/a2_interfaces/share/a2_interfaces/msg</code> and <code>.../srv</code></td></tr>
+</table>
+<p>Sourcing <code>install/setup.bash</code> adds these folders to the search paths that programs use to find libraries and Python modules. You can see it happen:</p>
+<pre class="cmd"><code>echo $LD_LIBRARY_PATH | tr : '\n' | grep workspace
+echo $PYTHONPATH | tr : '\n' | grep workspace
+python3 -c "import a2_interfaces; print(a2_interfaces.__file__)"</code></pre>
+<pre class="out">/workspace/code/02-messages-services/install/a2_interfaces/lib
+/workspace/code/02-messages-services/install/a2_interfaces/lib/python3.12/site-packages
+/workspace/code/02-messages-services/install/a2_interfaces/lib/python3.12/site-packages/a2_interfaces/__init__.py</pre>
+<p>The first two lines are search paths that sourcing added (the <code>grep</code> keeps only the ones from your folder, hiding the many from <code>/opt/ros</code> and <code>/opt/kortex_ws</code>). The last line shows Python finding the generated code there.</p>
+<div class="callout"><strong class="t">Rules of thumb</strong>
+Run <code>colcon build</code> again after changing C++ code or an interface file; it normally rebuilds only what changed. Python scripts need no rebuild. Deleting <code>build</code>, <code>install</code> and <code>log</code> is always safe: the next build recreates them. Run <code>colcon build</code> in the folder that contains your packages, because it creates these three folders in whatever folder you run it from. And every new shell must <code>source install/setup.bash</code> again.</div>
+</li>
+
+<li>
+<h3>Look at what was generated</h3>
+<p><span class="where box">container</span> List the interfaces that came from our package, then show them:</p>
+<pre class="cmd"><code>ros2 interface list | grep a2_
+ros2 interface show a2_interfaces/msg/SymbolicAction
+ros2 interface show a2_interfaces/srv/CheckAction</code></pre>
+<pre class="out">    a2_interfaces/msg/SymbolicAction
+    a2_interfaces/srv/CheckAction
+# One symbolic action, for example: unstack F W
+string name        # the action: pickup, putdown, stack or unstack
+string[] args      # the blocks it applies to, for example [F, W]
+# Request: an action to check
+SymbolicAction action
+	string name        #
+	string[] args      #
+---
+# Response: is it well formed, and why not
+bool valid
+string reason</pre>
+<p>The full name has three parts: <code>package/kind/Name</code>. <code>ros2 interface show</code> also expands the nested message: the indented lines under <code>SymbolicAction action</code> are its fields.</p>
+</li>
+
+<li>
+<h3>Send your message on a topic</h3>
+<p>Our message works on any topic, exactly like <code>String</code> in A1. Try it with the command line. <span class="where host">host</span> Open terminal 2 and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Every new container shell must source the build first. Then listen on a topic called <code>/action</code>, giving the type (the topic does not exist yet, so ROS 2 cannot look it up):</p>
+<pre class="cmd"><code>cd code/02-messages-services
+source install/setup.bash
+ros2 topic echo /action a2_interfaces/msg/SymbolicAction</code></pre>
+<p><span class="where box">container</span> In terminal 1, publish one <code>unstack F W</code> per second:</p>
+<pre class="cmd"><code>ros2 topic pub -r 1 /action a2_interfaces/msg/SymbolicAction "{name: unstack, args: [F, W]}"</code></pre>
+<p>Terminal 2 shows each message:</p>
+<pre class="out">name: unstack
+args:
+- F
+- W
+---</pre>
+<p>Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals. The curly braces in the command are YAML, a simple text format for the fields: <code>{name: unstack, args: [F, W]}</code>.</p>
+</li>
+
+<li>
+<h3>Read the server</h3>
+<div class="lang py">
+<p>This is <code>code/02-messages-services/py/server.py</code>:</p>
+<pre class="src" data-file="code/02-messages-services/py/server.py"><code>#!/usr/bin/env python3
+"""Service /check_action: says whether a symbolic action is well formed."""
+import rclpy
+from rclpy.node import Node
+from a2_interfaces.srv import CheckAction
+
+ARGUMENTS = {'pickup': 1, 'putdown': 1, 'stack': 2, 'unstack': 2}   # action -&gt; how many blocks it needs
+
+
+class Checker(Node):
+    def __init__(self):
+        super().__init__('checker')
+        self.create_service(CheckAction, 'check_action', self.on_request)
+
+    def on_request(self, request, response):
+        name, args = request.action.name, request.action.args
+        if name not in ARGUMENTS:
+            response.valid, response.reason = False, f"unknown action '{name}'"
+        elif len(args) != ARGUMENTS[name]:
+            response.valid, response.reason = False, f'{name} needs {ARGUMENTS[name]} blocks, got {len(args)}'
+        else:
+            response.valid, response.reason = True, 'ok'
+        self.get_logger().info(f'checked {name} {list(args)}: {response.reason}')
+        return response
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Checker())
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<ul>
+<li><code>from a2_interfaces.srv import CheckAction</code>: the generated code, imported like any Python module. The package, the kind (<code>srv</code>) and the name match what <code>ros2 interface list</code> showed.</li>
+<li><code>ARGUMENTS</code> is a dictionary: for each known action, how many blocks it needs.</li>
+<li><code>create_service(CheckAction, 'check_action', self.on_request)</code>: offer a service called <code>check_action</code> and call <code>on_request</code> for every request.</li>
+<li><code>on_request(self, request, response)</code> receives the request, fills in <code>response.valid</code> and <code>response.reason</code>, and <strong>returns</strong> the response. The reply goes to the caller when the function returns.</li>
+</ul>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/02-messages-services/cpp/src/server.cpp</code>:</p>
+<pre class="src" data-file="code/02-messages-services/cpp/src/server.cpp"><code>// Service /check_action: says whether a symbolic action is well formed.
+#include &lt;map&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "a2_interfaces/srv/check_action.hpp"
+
+using CheckAction = a2_interfaces::srv::CheckAction;
+
+// action -&gt; how many blocks it needs
+const std::map&lt;std::string, size_t&gt; ARGUMENTS = {{"pickup", 1}, {"putdown", 1}, {"stack", 2}, {"unstack", 2}};
+
+class Checker : public rclcpp::Node
+{
+public:
+  Checker() : Node("checker")
+  {
+    service_ = create_service&lt;CheckAction&gt;(
+      "check_action",
+      [this](const std::shared_ptr&lt;CheckAction::Request&gt; request, std::shared_ptr&lt;CheckAction::Response&gt; response) {
+        on_request(request, response);
+      });
+  }
+
+private:
+  void on_request(const std::shared_ptr&lt;CheckAction::Request&gt; request, std::shared_ptr&lt;CheckAction::Response&gt; response)
+  {
+    const std::string &amp; name = request-&gt;action.name;
+    const size_t count = request-&gt;action.args.size();
+    auto rule = ARGUMENTS.find(name);
+    if (rule == ARGUMENTS.end()) {
+      response-&gt;valid = false;
+      response-&gt;reason = "unknown action '" + name + "'";
+    } else if (count != rule-&gt;second) {
+      response-&gt;valid = false;
+      response-&gt;reason = name + " needs " + std::to_string(rule-&gt;second) + " blocks, got " + std::to_string(count);
+    } else {
+      response-&gt;valid = true;
+      response-&gt;reason = "ok";
+    }
+    RCLCPP_INFO(get_logger(), "checked %s (%zu blocks): %s", name.c_str(), count, response-&gt;reason.c_str());
+  }
+
+  rclcpp::Service&lt;CheckAction&gt;::SharedPtr service_;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Checker&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<ul>
+<li><code>#include "a2_interfaces/srv/check_action.hpp"</code>: the generated header. The file name is the service name in lower case with underscores (<code>CheckAction</code> becomes <code>check_action</code>).</li>
+<li><code>ARGUMENTS</code> is a map: for each known action, how many blocks it needs.</li>
+<li><code>create_service&lt;CheckAction&gt;("check_action", ...)</code>: offer a service called <code>check_action</code> and call the lambda for every request.</li>
+<li>The result of <code>create_service</code> is stored in the member <code>service_</code>. This is required, not decoration: in C++ the service exists only while that handle is alive. We tested it: with the <code>service_ =</code> part removed, the server starts but <code>/check_action</code> does not even appear in <code>ros2 service list</code>, and a client waits forever. (Python keeps the handle inside the node for you, so <code>server.py</code> does not store it.)</li>
+<li><code>on_request</code> receives pointers to the request and to the response, fills in <code>response-&gt;valid</code> and <code>response-&gt;reason</code>, and the reply goes to the caller when the function ends.</li>
+<li>The package's <code>CMakeLists.txt</code> says <code>find_package(a2_interfaces REQUIRED)</code>, and <code>package.xml</code> has <code>&lt;depend&gt;a2_interfaces&lt;/depend&gt;</code>: that is how the C++ build finds the generated code.</li>
+</ul>
+</div>
+<p>Notice that the server code looks at the request and answers. It does not know who asked.</p>
+</li>
+
+<li>
+<h3>Run the server and call it from the command line</h3>
+<p><span class="where box">container</span> In terminal 1 (the sourced shell in <code>code/02-messages-services</code>), start the server:</p>
+<div class="lang py"><pre class="cmd"><code>python3 py/server.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a2_services server</code></pre></div>
+<p>It prints nothing yet: it waits for requests. <span class="where box">container</span> In terminal 2, list the services and find ours:</p>
+<pre class="cmd"><code>ros2 service list -t | grep check_action</code></pre>
+<pre class="out">/check_action [a2_interfaces/srv/CheckAction]</pre>
+<p>(Without <code>grep</code> you also see the node's parameter services, as in the <code>node info</code> output of A1.) Now ask it a question. The request is YAML again, with the message nested inside:</p>
+<pre class="cmd"><code>ros2 service call /check_action a2_interfaces/srv/CheckAction "{action: {name: unstack, args: [F, W]}}"</code></pre>
+<pre class="out">requester: making request: a2_interfaces.srv.CheckAction_Request(action=a2_interfaces.msg.SymbolicAction(name='unstack', args=['F', 'W']))
+
+response:
+a2_interfaces.srv.CheckAction_Response(valid=True, reason='ok')</pre>
+<p>(You may see <code>waiting for service to become available...</code> above this for a moment.) Now a wrong one: <code>stack</code> needs two blocks and we give one:</p>
+<pre class="cmd"><code>ros2 service call /check_action a2_interfaces/srv/CheckAction "{action: {name: stack, args: [F]}}"</code></pre>
+<pre class="out">requester: making request: a2_interfaces.srv.CheckAction_Request(action=a2_interfaces.msg.SymbolicAction(name='stack', args=['F']))
+
+response:
+a2_interfaces.srv.CheckAction_Response(valid=False, reason='stack needs 2 blocks, got 1')</pre>
+<p>Terminal 1 logs each request it handled:</p>
+<div class="lang py"><pre class="out">[INFO] [1793935397.647154518] [checker]: checked unstack ['F', 'W']: ok
+[INFO] [1793935398.201488654] [checker]: checked stack ['F']: stack needs 2 blocks, got 1</pre></div>
+<div class="lang cpp"><pre class="out">[INFO] [1793935404.582735202] [checker]: checked unstack (2 blocks): ok
+[INFO] [1793935405.134715331] [checker]: checked stack (1 blocks): stack needs 2 blocks, got 1</pre></div>
+</li>
+
+<li>
+<h3>Read and run a client</h3>
+<p>Calling from the command line is handy for testing. A program calls services with a <em>client</em>.</p>
+<div class="lang py">
+<p>This is <code>code/02-messages-services/py/client.py</code>:</p>
+<pre class="src" data-file="code/02-messages-services/py/client.py"><code>#!/usr/bin/env python3
+"""Asks /check_action about one action, for example: python3 client.py unstack F W"""
+import sys
+import rclpy
+from rclpy.node import Node
+from a2_interfaces.srv import CheckAction
+
+
+def main():
+    rclpy.init()
+    node = Node('checker_client')
+    client = node.create_client(CheckAction, 'check_action')
+    while not client.wait_for_service(timeout_sec=1.0):
+        node.get_logger().info('waiting for the service...')
+
+    request = CheckAction.Request()
+    request.action.name = sys.argv[1]
+    request.action.args = sys.argv[2:]
+
+    future = client.call_async(request)
+    rclpy.spin_until_future_complete(node, future)
+    response = future.result()
+    print(f'valid={response.valid} reason={response.reason}')
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<ul>
+<li><code>create_client(CheckAction, 'check_action')</code>: a handle for calling that service. <code>wait_for_service</code> blocks until a server exists, so the client does not send a request into the void.</li>
+<li><code>CheckAction.Request()</code> creates an empty request. We fill in the nested message with the words typed on the command line: <code>sys.argv[1]</code> is the first word after the program name, <code>sys.argv[2:]</code> are the rest.</li>
+<li><code>call_async(request)</code> sends it and returns a <em>future</em>, a placeholder for the answer that has not arrived yet. <code>spin_until_future_complete</code> runs ROS 2 until the answer arrives, and <code>future.result()</code> is the response.</li>
+</ul>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/02-messages-services/cpp/src/client.cpp</code>:</p>
+<pre class="src" data-file="code/02-messages-services/cpp/src/client.cpp"><code>// Asks /check_action about one action, for example: ros2 run a2_services client unstack F W
+#include &lt;chrono&gt;
+#include &lt;iostream&gt;
+#include &lt;memory&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "a2_interfaces/srv/check_action.hpp"
+
+using CheckAction = a2_interfaces::srv::CheckAction;
+using namespace std::chrono_literals;
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  auto node = rclcpp::Node::make_shared("checker_client");
+  auto client = node-&gt;create_client&lt;CheckAction&gt;("check_action");
+  while (!client-&gt;wait_for_service(1s)) {
+    if (!rclcpp::ok()) {   // Ctrl+C while waiting: stop instead of looping forever
+      return 1;
+    }
+    RCLCPP_INFO(node-&gt;get_logger(), "waiting for the service...");
+  }
+
+  auto request = std::make_shared&lt;CheckAction::Request&gt;();
+  request-&gt;action.name = argv[1];
+  for (int i = 2; i &lt; argc; ++i) {
+    request-&gt;action.args.push_back(argv[i]);
+  }
+
+  auto future = client-&gt;async_send_request(request);
+  rclcpp::spin_until_future_complete(node, future);
+  auto response = future.get();
+  std::cout &lt;&lt; "valid=" &lt;&lt; (response-&gt;valid ? "True" : "False") &lt;&lt; " reason=" &lt;&lt; response-&gt;reason &lt;&lt; std::endl;
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<ul>
+<li><code>create_client&lt;CheckAction&gt;("check_action")</code>: a handle for calling that service. <code>wait_for_service</code> blocks until a server exists, so the client does not send a request into the void.</li>
+<li><code>std::make_shared&lt;CheckAction::Request&gt;()</code> creates an empty request. We fill in the nested message with the words typed on the command line: <code>argv[1]</code> is the first word after the program name, <code>argv[2]</code> onwards are the rest.</li>
+<li><code>async_send_request(request)</code> sends it and returns a <em>future</em>, a placeholder for the answer that has not arrived yet. <code>spin_until_future_complete</code> runs ROS 2 until the answer arrives, and <code>future.get()</code> is the response.</li>
+</ul>
+</div>
+<p><span class="where box">container</span> With the server still running in terminal 1, run the client in terminal 2 three times, with a good action, a wrong count, and an unknown action:</p>
+<div class="lang py"><pre class="cmd"><code>python3 py/client.py unstack F W
+python3 py/client.py stack F
+python3 py/client.py fly A B</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a2_services client unstack F W
+ros2 run a2_services client stack F
+ros2 run a2_services client fly A B</code></pre></div>
+<pre class="out">valid=True reason=ok
+valid=False reason=stack needs 2 blocks, got 1
+valid=False reason=unknown action 'fly'</pre>
+<p>The client is a different program, possibly in a different language, from the server. Both only share the interface. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 1 to stop the server and type <code>exit</code> in both terminals.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when, with the server running:</p>
+<ul>
+<li><code>ros2 service list -t | grep check_action</code> shows <code>/check_action [a2_interfaces/srv/CheckAction]</code>,</li>
+<li>the client prints <code>valid=True reason=ok</code> for <code>unstack F W</code>, and <code>valid=False reason=stack needs 2 blocks, got 1</code> for <code>stack F</code>.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> both client results above match and the server terminal logs each request.</div>
+
+<h2>5. Exercise</h2>
+<p>Predict the response to <code>pickup</code> with <strong>no</strong> blocks, then check it with the client (<code class="lang py">python3 py/client.py pickup</code><code class="lang cpp">ros2 run a2_services client pickup</code>). Then answer: why is "is this action valid?" a service and not a topic?</p>
+<details>
+<summary>Answer</summary>
+<p><code>pickup</code> needs 1 block and we give 0, so the server reports it the same way as for <code>stack</code>:</p>
+<pre class="out">valid=False reason=pickup needs 1 blocks, got 0</pre>
+<p>It is a service because the caller needs an answer to one specific question before it goes on, and wants it matched to that request. A topic would stream answers to anyone listening, with no link between a question and its answer, and the sender would not know whether anyone received it.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>An <strong>interface</strong> is a text file defining data: a <code>.msg</code> (fields, sent on a topic) or a <code>.srv</code> (request <code>---</code> response).</li>
+<li>Building the interface package generates Python and C++ code. Use it as <code>package.srv</code> / <code>package.msg</code> imports in Python and <code>package/srv/name.hpp</code> includes in C++. Source <code>install/setup.bash</code> in every new shell.</li>
+<li>A <strong>service</strong> is a request and a response. The server offers it with <code>create_service</code>; the client calls it with <code>create_client</code> and waits for the answer.</li>
+<li>Inspect with <code>ros2 interface list/show</code>, <code>ros2 service list -t</code>, and call by hand with <code>ros2 service call</code>.</li>
+<li>Topic for a stream, service for a question. Long jobs with progress are actions (A3).</li>
+</ul>
+
+<nav class="pager">
+<a href="a1-nodes-topics.html"><small>Previous</small>A1 · Nodes and topics</a>
+<span class="soon next"><small>Next</small>A3 · Actions (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

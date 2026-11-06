@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>a2_services</name>
+  <version>0.1.0</version>
+  <description>Lesson A2: a service server and client in C++</description>
+  <maintainer email="you@example.com">course</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>a2_interfaces</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
