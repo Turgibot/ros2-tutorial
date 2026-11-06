@@ -86,3 +86,9 @@ ul.toc .id { font-weight: 700; min-width: 2.4rem; }
 ul.toc .st { margin-left: auto; font-size: .75rem; color: var(--muted); white-space: nowrap; }
 footer.site { color: var(--muted); font-size: .85rem; padding-bottom: 2rem; }
 @media (max-width: 520px) { html { font-size: 16px; } h1 { font-size: 1.6rem; } ol.steps > li { padding-left: 2.4rem; } }
+
+/* Python / C++ switch: body[data-lang] picks which variant shows (default: Python) */
+body[data-lang="py"] .lang.cpp, body[data-lang="cpp"] .lang.py { display: none; }
+header.site .langsw { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+header.site .langsw button { font: inherit; font-size: .85rem; padding: .2rem .7rem; border: 0; background: transparent; color: var(--fg); cursor: pointer; }
+header.site .langsw button[aria-pressed="true"] { background: var(--accent); color: #fff; }

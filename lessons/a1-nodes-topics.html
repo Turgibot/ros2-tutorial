@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A1 · Nodes and topics</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A1 · Nodes and topics</h1>
+<p class="lead">Write two small programs (in Python or C++, your choice) that talk to each other through ROS 2, and learn to look at the conversation from outside.</p>
+
+<h2>1. Goal</h2>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>a <strong>talker</strong> program that publishes a message twice a second and a <strong>listener</strong> program that prints what it receives,</li>
+<li>used <code>ros2 node list</code>, <code>ros2 topic list</code>, <code>ros2 topic info</code>, <code>ros2 topic echo</code> and <code>ros2 topic hz</code> to inspect them,</li>
+<li>published a message by hand from the command line.</li>
+</ul>
+<p>The robot arm is controlled with exactly these ideas: a program that reads joint positions and a program that sends commands are nodes that exchange messages on topics.</p>
+
+<h2>2. Concepts</h2>
+<h3>Node, topic, message</h3>
+<ul>
+<li>A <strong>node</strong> is one running program that does one job and has a name (<code>talker</code>, <code>listener</code>). A robot system is many nodes.</li>
+<li>A <strong>topic</strong> is a named channel (<code>/chatter</code>). Names start with <code>/</code>.</li>
+<li>A <strong>message</strong> is one piece of data sent on a topic. Every topic carries one <strong>message type</strong>, such as <code>std_msgs/msg/String</code>, which has a single field <code>string data</code>.</li>
+<li>A node that sends on a topic <strong>publishes</strong>. A node that receives <strong>subscribes</strong>. Several nodes can publish or subscribe to the same topic.</li>
+</ul>
+<p>The publisher does not know who listens, and the listener does not know who talks. They only agree on the topic name and the message type. This is why you can start, stop and replace nodes one at a time.</p>
+<figure>
+<svg viewBox="0 0 700 150" role="img" aria-label="Diagram: the talker node publishes to the topic /chatter, which carries std_msgs/msg/String messages, and the listener node subscribes to it.">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+<style>svg text{fill:var(--fg);font:14px system-ui,sans-serif} svg .m{fill:var(--muted);font-size:12px} svg .b{font-weight:700}</style>
+<rect x="20" y="40" width="150" height="60" rx="30" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="95" y="76" text-anchor="middle" class="b">talker</text>
+<rect x="270" y="40" width="160" height="60" rx="8" fill="var(--out-bg)" stroke="var(--line)"/>
+<text x="350" y="66" text-anchor="middle" class="b">/chatter</text>
+<text x="350" y="86" text-anchor="middle" class="m">std_msgs/msg/String</text>
+<rect x="530" y="40" width="150" height="60" rx="30" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="605" y="76" text-anchor="middle" class="b">listener</text>
+<path d="M170 70 H268" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+<path d="M432 70 H528" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+<text x="220" y="60" text-anchor="middle" class="m">publishes</text>
+<text x="480" y="60" text-anchor="middle" class="m">subscribes</text>
+</svg>
+<figcaption>Nodes are the round shapes, the topic is the box between them. Messages flow left to right.</figcaption>
+</figure>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <strong>container shell</strong> (see A0, step 5). Open three terminals on your computer, and in each one go to the <code>ros2-tutorial</code> folder and run <code>docker/run_ros2.sh</code>. Below they are called terminal 1, 2 and 3. The code is in <code>code/01-nodes-topics/</code>, which you already have from <code>git clone</code>.</p>
+<p>Use the <strong>Python / C++</strong> switch at the top right of the page to choose your language. The choice is remembered for all lessons, and the ideas, commands and outputs are the same in both.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Read the talker</h3>
+<div class="lang py">
+<p>This is <code>code/01-nodes-topics/py/talker.py</code>, the whole file:</p>
+<pre class="src" data-file="code/01-nodes-topics/py/talker.py"><code>#!/usr/bin/env python3
+"""Publishes a counter on /chatter twice a second."""
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+
+class Talker(Node):
+    def __init__(self):
+        super().__init__('talker')
+        self.pub = self.create_publisher(String, 'chatter', 10)
+        self.count = 0
+        self.create_timer(0.5, self.tick)   # call self.tick every 0.5 s
+
+    def tick(self):
+        msg = String()
+        msg.data = f'hello {self.count}'
+        self.pub.publish(msg)
+        self.get_logger().info(f'sent: {msg.data}')
+        self.count += 1
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Talker())   # keep running and serving the timer until Ctrl+C
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<ul>
+<li><code>rclpy</code> is the ROS 2 Python library. <code>rclpy.init()</code> connects the program to ROS 2.</li>
+<li><code>super().__init__('talker')</code> creates the node and gives it the name <code>talker</code>.</li>
+<li><code>create_publisher(String, 'chatter', 10)</code> declares: this node publishes <code>String</code> messages on the topic <code>chatter</code> (shown as <code>/chatter</code>). The <code>10</code> is how many unsent messages may wait in a queue if the receiver is slow.</li>
+<li><code>create_timer(0.5, self.tick)</code> calls <code>tick</code> every 0.5 seconds. Each call fills a message, publishes it and logs it.</li>
+<li><code>rclpy.spin(...)</code> keeps the program alive and runs the timer. Without it the program would end immediately.</li>
+</ul>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/01-nodes-topics/cpp/src/talker.cpp</code>, the whole file:</p>
+<pre class="src" data-file="code/01-nodes-topics/cpp/src/talker.cpp"><code>// Publishes a counter on /chatter twice a second.
+#include &lt;chrono&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
+
+using namespace std::chrono_literals;
+
+class Talker : public rclcpp::Node
+{
+public:
+  Talker() : Node("talker")
+  {
+    pub_ = create_publisher&lt;std_msgs::msg::String&gt;("chatter", 10);
+    timer_ = create_wall_timer(500ms, [this]() { tick(); });   // call tick every 0.5 s
+  }
+
+private:
+  void tick()
+  {
+    std_msgs::msg::String msg;
+    msg.data = "hello " + std::to_string(count_++);
+    pub_-&gt;publish(msg);
+    RCLCPP_INFO(get_logger(), "sent: %s", msg.data.c_str());
+  }
+
+  rclcpp::Publisher&lt;std_msgs::msg::String&gt;::SharedPtr pub_;
+  rclcpp::TimerBase::SharedPtr timer_;
+  int count_ = 0;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Talker&gt;());   // keep running and serving the timer until Ctrl+C
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<ul>
+<li><code>rclcpp</code> is the ROS 2 C++ library. <code>rclcpp::init(argc, argv)</code> connects the program to ROS 2.</li>
+<li>Our class <code>Talker</code> is a <code>Node</code>. <code>Node("talker")</code> gives it the name <code>talker</code>.</li>
+<li><code>create_publisher&lt;std_msgs::msg::String&gt;("chatter", 10)</code> declares: this node publishes <code>String</code> messages on the topic <code>chatter</code> (shown as <code>/chatter</code>). The <code>10</code> is how many unsent messages may wait in a queue if the receiver is slow. The message type comes from the header <code>std_msgs/msg/string.hpp</code>.</li>
+<li><code>create_wall_timer(500ms, ...)</code> calls <code>tick</code> every 500 milliseconds. The <code>[this]() { tick(); }</code> part is a small unnamed function (a <em>lambda</em>) that calls our method.</li>
+<li><code>RCLCPP_INFO(get_logger(), "sent: %s", ...)</code> prints a log line. <code>%s</code> is replaced by the text that follows.</li>
+<li><code>rclcpp::spin(...)</code> keeps the program alive and runs the timer. Without it the program would end immediately.</li>
+</ul>
+</div>
+</li>
+
+<li>
+<h3>Read the listener</h3>
+<div class="lang py">
+<p>This is <code>code/01-nodes-topics/py/listener.py</code>:</p>
+<pre class="src" data-file="code/01-nodes-topics/py/listener.py"><code>#!/usr/bin/env python3
+"""Prints every message that arrives on /chatter."""
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+
+class Listener(Node):
+    def __init__(self):
+        super().__init__('listener')
+        self.create_subscription(String, 'chatter', self.on_message, 10)
+
+    def on_message(self, msg):
+        self.get_logger().info(f'heard: {msg.data}')
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Listener())
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<p><code>create_subscription(String, 'chatter', self.on_message, 10)</code> says: call <code>on_message</code> every time a <code>String</code> arrives on <code>chatter</code>. The type and the topic name must match the publisher's. The listener has no loop of its own: <code>spin</code> waits, and ROS 2 calls <code>on_message</code> when data comes.</p>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/01-nodes-topics/cpp/src/listener.cpp</code>:</p>
+<pre class="src" data-file="code/01-nodes-topics/cpp/src/listener.cpp"><code>// Prints every message that arrives on /chatter.
+#include &lt;memory&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
+
+class Listener : public rclcpp::Node
+{
+public:
+  Listener() : Node("listener")
+  {
+    sub_ = create_subscription&lt;std_msgs::msg::String&gt;(
+      "chatter", 10,
+      [this](const std_msgs::msg::String &amp; msg) { RCLCPP_INFO(get_logger(), "heard: %s", msg.data.c_str()); });
+  }
+
+private:
+  rclcpp::Subscription&lt;std_msgs::msg::String&gt;::SharedPtr sub_;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Listener&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<p><code>create_subscription&lt;std_msgs::msg::String&gt;("chatter", 10, ...)</code> says: call the given function every time a <code>String</code> arrives on <code>chatter</code>. The function is a lambda that receives the message (<code>msg</code>) and logs it. The type and the topic name must match the publisher's. The listener has no loop of its own: <code>spin</code> waits, and ROS 2 calls the function when data comes.</p>
+</div>
+</li>
+
+<li>
+<h3>Run the talker</h3>
+<p><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<div class="lang py">
+<p><span class="where box">container</span> Run the talker:</p>
+<pre class="cmd"><code>cd code/01-nodes-topics/py
+python3 talker.py</code></pre>
+</div>
+<div class="lang cpp">
+<p><span class="where box">container</span> C++ must be compiled before it runs. <code>colcon build</code> is ROS 2's build tool: it reads <code>package.xml</code> (the package name and what it depends on) and <code>CMakeLists.txt</code> (which programs to compile), and puts the result in an <code>install/</code> folder. Lesson A4 explains packages properly; for now just run it:</p>
+<pre class="cmd"><code>cd code/01-nodes-topics/cpp
+colcon build</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; a1_nodes_topics
+Finished &lt;&lt;&lt; a1_nodes_topics [4.07s]
+
+Summary: 1 package finished [4.12s]</pre>
+<p>Then <em>source</em> the result (A0 explained sourcing: it tells the shell where to find the new program) and run the talker with <code>ros2 run &lt;package&gt; &lt;program&gt;</code>:</p>
+<pre class="cmd"><code>source install/setup.bash
+ros2 run a1_nodes_topics talker</code></pre>
+</div>
+<pre class="out">[INFO] [1793885463.163031377] [talker]: sent: hello 0
+[INFO] [1793885463.656693945] [talker]: sent: hello 1
+[INFO] [1793885464.156627995] [talker]: sent: hello 2
+...</pre>
+<p>The long number is the time in seconds, so yours differs. The text in the second brackets is the node name. Leave it running.</p>
+</li>
+
+<li>
+<h3>Run the listener</h3>
+<p><span class="where host">host</span> Open terminal 2 and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<div class="lang py">
+<p><span class="where box">container</span> Run the listener:</p>
+<pre class="cmd"><code>cd code/01-nodes-topics/py
+python3 listener.py</code></pre>
+</div>
+<div class="lang cpp">
+<p><span class="where box">container</span> The program was already built in terminal 1, so only source the result (every new container shell must do this) and run it:</p>
+<pre class="cmd"><code>cd code/01-nodes-topics/cpp
+source install/setup.bash
+ros2 run a1_nodes_topics listener</code></pre>
+</div>
+<pre class="out">[INFO] [1793885476.156936401] [listener]: heard: hello 26
+[INFO] [1793885476.656945033] [listener]: heard: hello 27
+...</pre>
+<p>The counter starts wherever the talker is, not at 0: the listener only receives what is sent after it starts. Two programs, in two containers, are exchanging messages. Leave both running.</p>
+</li>
+
+<li>
+<h3>Look from outside</h3>
+<p><span class="where host">host</span> Open terminal 3 and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Ask ROS 2 what is running:</p>
+<pre class="cmd"><code>ros2 node list
+ros2 topic list</code></pre>
+<pre class="out">/listener
+/talker
+/chatter
+/parameter_events
+/rosout</pre>
+<p>The first two lines are the nodes, the last three are the topics. <code>/chatter</code> is ours. <code>/parameter_events</code> and <code>/rosout</code> exist for every node (they carry settings changes and log messages). Add <code>-t</code> to see each topic's message type, then ask about our topic:</p>
+<pre class="cmd"><code>ros2 topic list -t
+ros2 topic info /chatter</code></pre>
+<pre class="out">/chatter [std_msgs/msg/String]
+/parameter_events [rcl_interfaces/msg/ParameterEvent]
+/rosout [rcl_interfaces/msg/Log]
+Type: std_msgs/msg/String
+Publisher count: 1
+Subscription count: 1</pre>
+<p>One publisher and one subscriber, as in the diagram. Now ask the talker node what it does:</p>
+<pre class="cmd"><code>ros2 node info /talker</code></pre>
+<pre class="out lang py">/talker
+  Subscribers:
+
+  Publishers:
+    /chatter: std_msgs/msg/String
+    /parameter_events: rcl_interfaces/msg/ParameterEvent
+    /rosout: rcl_interfaces/msg/Log
+  Service Servers:
+    /talker/describe_parameters: rcl_interfaces/srv/DescribeParameters
+    ...
+  Service Clients:
+
+  Action Servers:
+
+  Action Clients:
+</pre>
+<pre class="out lang cpp">/talker
+  Subscribers:
+    /parameter_events: rcl_interfaces/msg/ParameterEvent
+  Publishers:
+    /chatter: std_msgs/msg/String
+    /parameter_events: rcl_interfaces/msg/ParameterEvent
+    /rosout: rcl_interfaces/msg/Log
+  Service Servers:
+    /talker/describe_parameters: rcl_interfaces/srv/DescribeParameters
+    ...
+  Service Clients:
+
+  Action Servers:
+
+  Action Clients:
+</pre>
+<p>The part that matters for now is <strong>Publishers</strong>: our node publishes <code>/chatter</code>. <span class="lang cpp">The C++ node also subscribes to <code>/parameter_events</code> (its parameter handling listens for settings changes); the Python node does not, so this part of the output differs between the two languages. Both are normal.</span> The services are explained in lesson A2, and the actions in A3.</p>
+</li>
+
+<li>
+<h3>Watch the data and its rate</h3>
+<p><span class="where box">container</span> Still in terminal 3, print the messages as they pass:</p>
+<pre class="cmd"><code>ros2 topic echo /chatter</code></pre>
+<pre class="out">data: hello 12
+---
+data: hello 13
+---
+...</pre>
+<p>Press <kbd>Ctrl</kbd>+<kbd>C</kbd>. <code>echo</code> is a third subscriber: it does not disturb the listener. Now measure how often messages arrive:</p>
+<pre class="cmd"><code>ros2 topic hz /chatter</code></pre>
+<pre class="out">average rate: 2.000
+	min: 0.500s max: 0.500s std dev: 0.00028s window: 4</pre>
+<p>2 messages per second, 0.5 s apart, matching <code>create_timer(0.5, ...)</code>. Press <kbd>Ctrl</kbd>+<kbd>C</kbd>. <code>topic hz</code> is the first thing to check when a robot "does not respond": is data arriving, and how fast?</p>
+<p>You can also see the message definition behind a type:</p>
+<pre class="cmd"><code>ros2 interface show std_msgs/msg/String</code></pre>
+<pre class="out"># This was originally provided as an example message.
+# It is deprecated as of Foxy
+# It is recommended to create your own semantically meaningful message.
+# However if you would like to continue using this please use the equivalent in example_msgs.
+
+string data</pre>
+<p>The last line is the whole message: one field named <code>data</code> of type <code>string</code>. (The comment says to prefer your own message types. We make one in lesson A2.)</p>
+</li>
+
+<li>
+<h3>Publish from the command line</h3>
+<p><span class="where box">container</span> In terminal 3, send your own message to the same topic. The listener in terminal 2 cannot tell the difference between this and the talker:</p>
+<pre class="cmd"><code>ros2 topic pub -r 1 /chatter std_msgs/msg/String "{data: typed by hand}"</code></pre>
+<p>Look at terminal 2: lines <code>heard: typed by hand</code> appear among the <code>hello N</code> lines, once a second. <code>-r 1</code> means one message per second. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 3 to stop. Here <code>ros2 topic info /chatter</code> would have shown 2 publishers.</p>
+</li>
+
+<li>
+<h3>Stop one side</h3>
+<p>Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 1 (the talker). The listener keeps running and prints nothing: it is not an error, it just has nothing to receive. Start the talker again with the same command as in step 3, and the listener resumes by itself. Neither program had to know about the other's restart. Now press <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 2 too, and type <code>exit</code> in all three terminals.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when all of these are true while both programs run:</p>
+<ul>
+<li><code>ros2 node list</code> shows <code>/listener</code> and <code>/talker</code>,</li>
+<li><code>ros2 topic info /chatter</code> shows <code>Publisher count: 1</code> and <code>Subscription count: 1</code>,</li>
+<li><code>ros2 topic hz /chatter</code> reports an average rate of about 2.000.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> the listener prints <code>heard: hello N</code> lines and the three checks above agree.</div>
+
+<h2>5. Exercise</h2>
+<p>Change the timer in the talker (<code class="lang py">talker.py</code><code class="lang cpp">talker.cpp</code>) so it publishes <strong>10 times per second</strong>. <span class="lang cpp">Compile again with <code>colcon build</code> and source <code>install/setup.bash</code> in the terminal where you run the talker. </span>Restart the talker and run <code>ros2 topic hz /chatter</code>. What number do you expect? Then try this: with the talker running, run <code>ros2 topic echo /nothing_here</code>. What happens, and why?</p>
+<details>
+<summary>Answer</summary>
+<p>10 messages per second means one every 0.1 s, so change the period to 0.1 s: <code class="lang py">self.create_timer(0.1, self.tick)</code><code class="lang cpp">create_wall_timer(100ms, ...)</code>. The rate is the inverse of the period: 1 / 0.1 s = 10 Hz.</p>
+<pre class="out">average rate: 9.999
+	min: 0.100s max: 0.100s std dev: 0.00014s window: 22</pre>
+<p>For the second part you see, after a few seconds:</p>
+<pre class="out">WARNING: topic [/nothing_here] does not appear to be published yet
+Could not determine the type for the passed topic</pre>
+<p>No node publishes <code>/nothing_here</code>, so ROS 2 cannot find a message type for it, and <code>echo</code> needs the type to subscribe. A mistyped topic name is one of the most common mistakes: <code>ros2 topic list</code> shows the names that really exist.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A <strong>node</strong> is a named running program. Nodes exchange data on <strong>topics</strong>, and every topic has one <strong>message type</strong>.</li>
+<li>A node <strong>publishes</strong> with <code>create_publisher</code> and <strong>subscribes</strong> with <code>create_subscription</code>, giving a type, a topic name, a queue size (and, for the subscriber, a function to call). <code class="lang py">rclpy.spin</code><code class="lang cpp">rclcpp::spin</code> keeps it running.</li>
+<li>Publishers and subscribers do not know each other. Only the topic name and the type must match.</li>
+<li>Python needs no build; C++ is compiled with <code>colcon build</code> and started with <code>ros2 run</code> after sourcing <code>install/setup.bash</code>.</li>
+<li>Inspect with <code>ros2 node list</code>, <code>ros2 topic list -t</code>, <code>ros2 topic info</code>, <code>ros2 topic echo</code>, <code>ros2 topic hz</code>, and send with <code>ros2 topic pub</code>.</li>
+</ul>
+
+<nav class="pager">
+<a href="a0-environment.html"><small>Previous</small>A0 · The course environment</a>
+<span class="soon next"><small>Next</small>A2 · Messages and services (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

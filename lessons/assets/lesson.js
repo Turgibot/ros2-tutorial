@@ -31,3 +31,28 @@
     pre.appendChild(btn);
   });
 })();
+
+// Python / C++ switch: only on pages that have .lang blocks. The choice is remembered across lessons.
+(function () {
+  if (!document.querySelector('.lang')) return;
+  var lang = 'py';
+  try { lang = localStorage.getItem('lang') === 'cpp' ? 'cpp' : 'py'; } catch (e) {}
+  var box = document.createElement('div');
+  box.className = 'langsw';
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', 'Programming language');
+  var buttons = {};
+  function apply(l) {
+    document.body.setAttribute('data-lang', l);
+    for (var k in buttons) buttons[k].setAttribute('aria-pressed', k === l ? 'true' : 'false');
+    try { localStorage.setItem('lang', l); } catch (e) {}
+  }
+  [['py', 'Python'], ['cpp', 'C++']].forEach(function (p) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = p[1];
+    b.addEventListener('click', function () { apply(p[0]); });
+    buttons[p[0]] = b; box.appendChild(b);
+  });
+  document.querySelector('header.site').appendChild(box);
+  apply(lang);
+})();
