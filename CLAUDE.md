@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Planning and environment stage. The repo holds `PLAN.md` (course outline, decisions, and the environment test results), `README.md`, `docker/` (Dockerfile and run script) and `scripts/check_machine.sh`. Lessons A0, A1 and A2 are written (`lessons/`, `code/01-nodes-topics/`, `code/02-messages-services/`). There is no lint or test suite.
+Planning and environment stage. The repo holds `PLAN.md` (course outline, decisions, and the environment test results), `README.md`, `docker/` (Dockerfile and run script) and `scripts/check_machine.sh`. Lessons A0 to A3 are written (`lessons/`, `code/01-nodes-topics/`, `code/02-messages-services/`, `code/03-actions/`). There is no lint or test suite.
 
 ## What this is
 
 A hands-on course for ROS 2 (Jazzy) and the Kinova Gen3 7-DoF arm, meant to be shared with colleagues. Simulation uses ROS 2 tools only (ros2_control mock components + RViz, Gazebo Harmonic via `ros_gz`); Isaac Sim was dropped from scope. `PLAN.md` is the source of truth for lesson order, scope and rules. Read it before adding content.
 
 Layout:
-- `lessons/`: the static website. `index.html` (contents), one file per lesson (`a0-environment.html`, `a1-nodes-topics.html` and `a2-messages-services.html` exist so far), `assets/style.css`, `assets/lesson.js`, `img/` for screenshots. No build step, no external dependencies; preview by opening the file in a browser.
+- `lessons/`: the static website. `index.html` (contents), one file per lesson (`a0-environment.html`, `a1-nodes-topics.html` and `a2-messages-services.html` and `a3-actions.html` exist so far), `assets/style.css`, `assets/lesson.js`, `img/` for screenshots. No build step, no external dependencies; preview by opening the file in a browser.
 - `code/NN-name/`: runnable code for each lesson, with `py/` and `cpp/` (a colcon package) subfolders. Every lesson with code supports both languages: wrap language-specific blocks in `<div class="lang py">` / `<div class="lang cpp">` (or an inline `class="lang py"` span/code). `lesson.js` adds the Python/C++ switch to the header on pages that have `.lang` elements and remembers the choice. Run both variants before handing over.
 - Parts: A (ROS 2 basics), B (Kinova Gen3, MoveIt 2), C (simulation with Gazebo), D (symbols to motion), E (optional: the GR-Blocks paper on robots)
 

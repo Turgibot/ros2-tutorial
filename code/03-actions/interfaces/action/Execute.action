@@ -1,0 +1,11 @@
+# Goal: the symbolic action to carry out, for example: unstack F W
+string name
+string[] args
+---
+# Result: how it ended
+bool success
+string message
+---
+# Feedback: sent while the action runs
+string phase       # phase just finished
+float32 progress   # 0.25, 0.5, 0.75, then 1.0

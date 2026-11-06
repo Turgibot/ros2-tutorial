@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A3 · Actions</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A3 · Actions</h1>
+<p class="lead">Give a robot a job that takes time: watch its progress while it works, get a result at the end, and cancel it on the way.</p>
+
+<h2>1. Goal</h2>
+<p>In A2 we met the symbolic action <code>unstack F W</code>. A real arm needs several seconds to carry it out: move above the block, close the gripper, lift, and so on. A service is the wrong tool for that (the client would wait with no news until the end, and could not stop it), and so is a topic (there is no "this is the answer to my request").</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>defined an <strong>action</strong>, <code>Execute</code>, with a goal, feedback and a result,</li>
+<li>run an <strong>action server</strong> that pretends to carry out a symbolic action in four phases, and sent it goals from the command line and from a <strong>client</strong> program,</li>
+<li>watched the feedback arrive while the goal runs, and <strong>cancelled</strong> a goal before it finished.</li>
+</ul>
+<p>The server here only waits one second per phase. In Part D the same interface will drive a real pick-and-place.</p>
+
+<h2>2. Concepts</h2>
+<h3>Goal, feedback, result, cancel</h3>
+<p>An <strong>action</strong> is for a job that takes time. It has these parts:</p>
+<ul>
+<li>the <strong>goal</strong>: what to do (the client sends it, the server accepts or rejects it),</li>
+<li><strong>feedback</strong>: progress messages, sent by the server while it works,</li>
+<li>the <strong>result</strong>: one final message when the job ends,</li>
+<li><strong>cancel</strong>: the client may ask the server to stop early.</li>
+</ul>
+<p>It is defined in an <strong>action file</strong> (<code>.action</code>), which is three message definitions in one file, separated by <code>---</code>: goal, result, feedback, in that order. It is an interface, like the <code>.msg</code> and <code>.srv</code> files of A2.</p>
+<p>A goal always ends in one of three <strong>statuses</strong>: <code>SUCCEEDED</code>, <code>CANCELED</code> (the client asked to stop and the server did), or <code>ABORTED</code> (the server gave up, for example because the arm hit a limit).</p>
+<figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="Sequence diagram. The client sends a goal to the server, the server accepts it, then sends feedback messages repeatedly, and finally a result. A cancel request from the client can stop the work before the result.">
+<defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+<style>svg text{fill:var(--fg);font:14px system-ui,sans-serif} svg .m{fill:var(--muted);font-size:12px} svg .b{font-weight:700}</style>
+<rect x="40" y="10" width="130" height="38" rx="19" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="105" y="34" text-anchor="middle" class="b">client</text>
+<rect x="530" y="10" width="130" height="38" rx="19" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="595" y="34" text-anchor="middle" class="b">server</text>
+<path d="M105 48 V240" stroke="var(--line)" stroke-width="2" stroke-dasharray="5 4"/>
+<path d="M595 48 V240" stroke="var(--line)" stroke-width="2" stroke-dasharray="5 4"/>
+<path d="M105 70 H593" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar3)"/><text x="350" y="64" text-anchor="middle">goal: unstack F W</text>
+<path d="M593 96 H107" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar3)"/><text x="350" y="90" text-anchor="middle" class="m">accepted</text>
+<path d="M593 124 H107" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar3)"/><text x="350" y="118" text-anchor="middle">feedback: approach 0.25</text>
+<path d="M593 150 H107" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar3)"/><text x="350" y="144" text-anchor="middle">feedback: grasp 0.50  ... (while it works)</text>
+<path d="M105 180 H593" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar3)"/><text x="350" y="174" text-anchor="middle" class="m">cancel (optional, any time before the end)</text>
+<path d="M593 214 H107" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar3)"/><text x="350" y="208" text-anchor="middle">result: SUCCEEDED, or CANCELED / ABORTED</text>
+</svg>
+<figcaption>One goal, a stream of feedback, one result. The dashed cancel is optional.</figcaption>
+</figure>
+
+<h3>Actions are built from topics and services</h3>
+<p>Nothing new is needed underneath: an action is a bundle of the two things you already know, used in the way that suits each part.</p>
+<p><strong>How.</strong> You never create these yourself. When a server offers an action called <code>execute</code>, the ROS 2 library creates three services and two topics under the name <code>/execute/_action/...</code>. When a client connects to <code>execute</code>, it finds them by that name. Their message types are generated from the <code>.action</code> file when you build it. They are hidden from the normal <code>ros2 service list</code> and <code>ros2 topic list</code>, and you will list them below.</p>
+<table>
+<tr><th>Part</th><th>Used as</th><th>Hidden name</th><th>Why</th></tr>
+<tr><td>Goal</td><td>service</td><td><code>send_goal</code></td><td>The client needs an answer: accepted or rejected. A service gives exactly that reply to exactly that caller.</td></tr>
+<tr><td>Result</td><td>service</td><td><code>get_result</code></td><td>The client asks for it when it wants it, and the server answers once the goal has ended. A result published on a topic could be missed if the client was not listening at that moment.</td></tr>
+<tr><td>Cancel</td><td>service</td><td><code>cancel_goal</code></td><td>The client needs to know which goals are now being cancelled (you will see this in the reply).</td></tr>
+<tr><td>Feedback</td><td>topic</td><td><code>feedback</code></td><td>A stream of updates, sent whenever the server likes, without waiting for anyone. If one is missed, the next one replaces it.</td></tr>
+<tr><td>Status</td><td>topic</td><td><code>status</code></td><td>The state of every goal (accepted, executing, cancelling, ...), sent as it changes, for anyone who wants to watch.</td></tr>
+</table>
+<p>The rule of thumb is the one from A2: a topic for a stream that nobody has to answer, a service for a question that needs an answer. The service and topic messages carry a <strong>goal ID</strong> (the "Goal accepted with ID: ..." you will see below), so that when several clients send goals at once, each one receives only the feedback and result of its own goal.</p>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <strong>container shell</strong> (A0, step 5). You will use up to three terminals. The code is in <code>code/03-actions/</code>. Choose your language with the <strong>Python / C++</strong> switch at the top right.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Read the action</h3>
+<p>The interface package is <code>code/03-actions/interfaces/</code>, and this is <code>action/Execute.action</code>:</p>
+<pre class="src" data-file="code/03-actions/interfaces/action/Execute.action"><code># Goal: the symbolic action to carry out, for example: unstack F W
+string name
+string[] args
+---
+# Result: how it ended
+bool success
+string message
+---
+# Feedback: sent while the action runs
+string phase       # phase just finished
+float32 progress   # 0.25, 0.5, 0.75, then 1.0</code></pre>
+<p>The goal is the same two fields as the <code>SymbolicAction</code> of A2. The result says whether it worked. The feedback names the phase that just finished and how far along we are, from 0 to 1. The package files (<code>package.xml</code>, <code>CMakeLists.txt</code>) follow the pattern of A2, with <code>"action/Execute.action"</code> in the list of files to generate.</p>
+</li>
+
+<li>
+<h3>Build</h3>
+<p><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Build and source, as in A2:</p>
+<pre class="cmd"><code>cd code/03-actions
+colcon build
+source install/setup.bash</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; a3_interfaces
+Finished &lt;&lt;&lt; a3_interfaces [3.39s]
+Starting &gt;&gt;&gt; a3_actions
+Finished &lt;&lt;&lt; a3_actions [2.65s]
+
+Summary: 2 packages finished [6.09s]</pre>
+<p>Check what was generated:</p>
+<pre class="cmd"><code>ros2 interface show a3_interfaces/action/Execute</code></pre>
+<pre class="out"># Goal: the symbolic action to carry out, for example: unstack F W
+string name
+string[] args
+---
+# Result: how it ended
+bool success
+string message
+---
+# Feedback: sent while the action runs
+string phase       # phase just finished
+float32 progress   # 0.25, 0.5, 0.75, then 1.0</pre>
+</li>
+
+<li>
+<h3>Read the server</h3>
+<div class="lang py">
+<p>This is <code>code/03-actions/py/server.py</code>:</p>
+<pre class="src" data-file="code/03-actions/py/server.py"><code>#!/usr/bin/env python3
+"""Action server /execute: pretends to carry out a symbolic action in four phases (1 s each)."""
+import time
+
+import rclpy
+from rclpy.action import ActionServer, CancelResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from a3_interfaces.action import Execute
+
+PHASES = ['approach', 'grasp', 'lift', 'place']
+
+
+class Robot(Node):
+    def __init__(self):
+        super().__init__('robot')
+        # Reentrant group + multi-threaded executor: a cancel request must be handled
+        # while execute() is still running.
+        ActionServer(self, Execute, 'execute',
+                     execute_callback=self.execute,
+                     cancel_callback=lambda goal_handle: CancelResponse.ACCEPT,
+                     callback_group=ReentrantCallbackGroup())
+
+    def execute(self, goal_handle):
+        action = f'{goal_handle.request.name} {" ".join(goal_handle.request.args)}'
+        self.get_logger().info(f'executing: {action}')
+        feedback = Execute.Feedback()
+        for i, phase in enumerate(PHASES):
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                self.get_logger().info(f'canceled before {phase}')
+                return Execute.Result(success=False, message=f'canceled before {phase}')
+            time.sleep(1.0)   # the "work"
+            feedback.phase = phase
+            feedback.progress = (i + 1) / len(PHASES)
+            goal_handle.publish_feedback(feedback)
+        goal_handle.succeed()
+        self.get_logger().info(f'done: {action}')
+        return Execute.Result(success=True, message=f'{action}: done')
+
+
+def main():
+    rclpy.init()
+    executor = MultiThreadedExecutor()
+    executor.add_node(Robot())
+    executor.spin()
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<ul>
+<li><code>ActionServer(self, Execute, 'execute', execute_callback=..., cancel_callback=...)</code> offers an action called <code>execute</code>. By default every goal is accepted.</li>
+<li><code>execute(goal_handle)</code> runs once per goal. The request is in <code>goal_handle.request</code>. It loops over the four phases: it "works" (<code>time.sleep(1.0)</code> stands in for moving the arm), then sends progress with <code>goal_handle.publish_feedback(...)</code>.</li>
+<li>At the start of every phase it asks <code>goal_handle.is_cancel_requested</code>. If true, it ends the goal with <code>goal_handle.canceled()</code> and returns a result. Otherwise, after the last phase, <code>goal_handle.succeed()</code> and a result with <code>success=True</code>. (<code>goal_handle.abort()</code> would end with status <code>ABORTED</code>.) Your code decides when to look at the cancel flag, so the arm can only stop at points where that is safe: here, between phases.</li>
+<li><code>cancel_callback</code> answers "may this goal be cancelled?". We always say <code>ACCEPT</code>.</li>
+<li><code>MultiThreadedExecutor</code> and <code>ReentrantCallbackGroup</code>: while <code>execute</code> is busy sleeping, ROS 2 must still be able to receive a cancel request. With the single-threaded executor of A1 and A2 it could not, because that one thread would be stuck inside <code>execute</code>. We tested it: without these two lines, a cancel request made during the goal is not answered until the goal has already finished, and then it finds nothing left to cancel (<code>goals_canceling=[]</code>), so the goal succeeds. These two lines allow several callbacks to run at the same time.</li>
+</ul>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/03-actions/cpp/src/server.cpp</code>:</p>
+<pre class="src" data-file="code/03-actions/cpp/src/server.cpp"><code>// Action server /execute: pretends to carry out a symbolic action in four phases (1 s each).
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;thread&gt;
+#include &lt;vector&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "a3_interfaces/action/execute.hpp"
+
+using Execute = a3_interfaces::action::Execute;
+using GoalHandle = rclcpp_action::ServerGoalHandle&lt;Execute&gt;;
+using namespace std::chrono_literals;
+
+const std::vector&lt;std::string&gt; PHASES = {"approach", "grasp", "lift", "place"};
+
+class Robot : public rclcpp::Node
+{
+public:
+  Robot() : Node("robot")
+  {
+    using namespace std::placeholders;
+    server_ = rclcpp_action::create_server&lt;Execute&gt;(
+      this, "execute",
+      [](const rclcpp_action::GoalUUID &amp;, std::shared_ptr&lt;const Execute::Goal&gt;) {
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;   // accept every goal
+      },
+      [](const std::shared_ptr&lt;GoalHandle&gt;) {
+        return rclcpp_action::CancelResponse::ACCEPT;             // accept every cancel request
+      },
+      [this](const std::shared_ptr&lt;GoalHandle&gt; goal_handle) {
+        // Run on a separate thread, so this callback returns at once and the node keeps
+        // handling other requests (such as a cancel) while the action runs.
+        std::thread([this, goal_handle]() { execute(goal_handle); }).detach();
+      });
+  }
+
+private:
+  void execute(const std::shared_ptr&lt;GoalHandle&gt; goal_handle)
+  {
+    std::string action = goal_handle-&gt;get_goal()-&gt;name;
+    for (const auto &amp; arg : goal_handle-&gt;get_goal()-&gt;args) {
+      action += " " + arg;
+    }
+    RCLCPP_INFO(get_logger(), "executing: %s", action.c_str());
+
+    auto feedback = std::make_shared&lt;Execute::Feedback&gt;();
+    auto result = std::make_shared&lt;Execute::Result&gt;();
+    for (size_t i = 0; i &lt; PHASES.size(); ++i) {
+      if (goal_handle-&gt;is_canceling()) {
+        result-&gt;success = false;
+        result-&gt;message = "canceled before " + PHASES[i];
+        goal_handle-&gt;canceled(result);
+        RCLCPP_INFO(get_logger(), "canceled before %s", PHASES[i].c_str());
+        return;
+      }
+      std::this_thread::sleep_for(1s);   // the "work"
+      feedback-&gt;phase = PHASES[i];
+      feedback-&gt;progress = static_cast&lt;float&gt;(i + 1) / PHASES.size();
+      goal_handle-&gt;publish_feedback(feedback);
+    }
+    result-&gt;success = true;
+    result-&gt;message = action + ": done";
+    goal_handle-&gt;succeed(result);
+    RCLCPP_INFO(get_logger(), "done: %s", action.c_str());
+  }
+
+  rclcpp_action::Server&lt;Execute&gt;::SharedPtr server_;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Robot&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<ul>
+<li><code>rclcpp_action::create_server&lt;Execute&gt;(this, "execute", ...)</code> offers an action called <code>execute</code>, with three functions: one decides about a new goal (we <code>ACCEPT_AND_EXECUTE</code> every goal), one decides about a cancel request (we always <code>ACCEPT</code>), and one is called once a goal is accepted. The result is kept in the member <code>server_</code> (as in A2: the server exists only while this handle is alive).</li>
+<li>The third function starts <code>execute</code> on a <strong>new thread</strong> and returns immediately. Otherwise the node would be stuck inside <code>execute</code> for the whole action and could not receive a cancel request in the meantime. We tested it: without the thread, a cancel request made during the goal is not answered until the goal has already finished, and then it finds nothing left to cancel (<code>goals_canceling=[]</code>), so the goal succeeds.</li>
+<li><code>execute(goal_handle)</code> runs once per goal. The request is <code>goal_handle-&gt;get_goal()</code>. It loops over the four phases: it "works" (<code>sleep_for(1s)</code> stands in for moving the arm), then sends progress with <code>publish_feedback</code>.</li>
+<li>At the start of every phase it asks <code>goal_handle-&gt;is_canceling()</code>. If true, it ends the goal with <code>canceled(result)</code>. Otherwise, after the last phase, <code>succeed(result)</code>. (<code>abort(result)</code> would end with status <code>ABORTED</code>.) Your code decides when to look at the cancel flag, so the arm can only stop at points where that is safe: here, between phases.</li>
+<li>The package's <code>CMakeLists.txt</code> and <code>package.xml</code> add the library <code>rclcpp_action</code> next to <code>rclcpp</code>.</li>
+</ul>
+</div>
+</li>
+
+<li>
+<h3>Run the server and inspect it</h3>
+<p><span class="where box">container</span> In terminal 1 (the sourced shell in <code>code/03-actions</code>), start the server:</p>
+<div class="lang py"><pre class="cmd"><code>python3 py/server.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a3_actions server</code></pre></div>
+<p><span class="where host">host</span> Open terminal 2 and enter a container:</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Source the build and ask what actions exist:</p>
+<pre class="cmd"><code>cd code/03-actions
+source install/setup.bash
+ros2 action list -t
+ros2 action info /execute</code></pre>
+<pre class="out">/execute [a3_interfaces/action/Execute]
+Action: /execute
+Action clients: 0
+Action servers: 1
+    /robot</pre>
+<p>Our server is the node <code>/robot</code>. The hidden parts are shown by adding a flag to the list commands you know from A1 and A2:</p>
+<pre class="cmd"><code>ros2 service list -t --include-hidden-services | grep execute
+ros2 topic list -t --include-hidden-topics | grep execute</code></pre>
+<pre class="out">/execute/_action/cancel_goal [action_msgs/srv/CancelGoal]
+/execute/_action/get_result [a3_interfaces/action/Execute_GetResult]
+/execute/_action/send_goal [a3_interfaces/action/Execute_SendGoal]
+/execute/_action/feedback [a3_interfaces/action/Execute_FeedbackMessage]
+/execute/_action/status [action_msgs/msg/GoalStatusArray]</pre>
+<p>Three services and two topics, as in the table in the Concepts section. <code>Execute_SendGoal</code>, <code>Execute_GetResult</code> and <code>Execute_FeedbackMessage</code> are message types that ROS 2 generated from <code>Execute.action</code> for you. <code>CancelGoal</code> and <code>GoalStatusArray</code> are the same for every action.</p>
+</li>
+
+<li>
+<h3>Send a goal from the command line</h3>
+<p><span class="where box">container</span> In terminal 2:</p>
+<pre class="cmd"><code>ros2 action send_goal --feedback /execute a3_interfaces/action/Execute "{name: unstack, args: [F, W]}"</code></pre>
+<p>The goal takes about 4 seconds, and the feedback lines appear one per second as the phases finish:</p>
+<pre class="out">Waiting for an action server to become available...
+Sending goal:
+     name: unstack
+args:
+- F
+- W
+
+Goal accepted with ID: 7aeda3a7881e4602af22069788004180
+
+Feedback:
+    phase: approach
+progress: 0.25
+
+Feedback:
+    phase: grasp
+progress: 0.5
+
+Feedback:
+    phase: lift
+progress: 0.75
+
+Feedback:
+    phase: place
+progress: 1.0
+
+Result:
+    success: true
+message: 'unstack F W: done'
+
+Goal finished with status: SUCCEEDED</pre>
+<p>The goal ID differs each time. Without <code>--feedback</code> you only get the result. The server's terminal (terminal 1) shows <code>executing: unstack F W</code> at the start and <code>done: unstack F W</code> at the end.</p>
+</li>
+
+<li>
+<h3>Cancel a goal</h3>
+<p><span class="where box">container</span> In terminal 2, send the goal again, and wait for the second feedback line (<code>grasp</code>):</p>
+<pre class="cmd"><code>ros2 action send_goal --feedback /execute a3_interfaces/action/Execute "{name: unstack, args: [F, W]}"</code></pre>
+<p><span class="where host">host</span> Quickly open terminal 3 and enter a container (do this beforehand, to have it ready):</p>
+<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Cancelling is a call to the hidden <code>cancel_goal</code> service. An all-zero goal ID in the request means "cancel everything":</p>
+<pre class="cmd"><code>cd code/03-actions
+source install/setup.bash
+ros2 service call /execute/_action/cancel_goal action_msgs/srv/CancelGoal "{}"</code></pre>
+<pre class="out">waiting for service to become available...
+requester: making request: action_msgs.srv.CancelGoal_Request(goal_info=action_msgs.msg.GoalInfo(goal_id=unique_identifier_msgs.msg.UUID(uuid=array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=uint8)), stamp=builtin_interfaces.msg.Time(sec=0, nanosec=0)))
+
+response:
+action_msgs.srv.CancelGoal_Response(return_code=0, goals_canceling=[action_msgs.msg.GoalInfo(goal_id=unique_identifier_msgs.msg.UUID(uuid=array([...], dtype=uint8)), stamp=builtin_interfaces.msg.Time(sec=..., nanosec=...))])</pre>
+<p>(The numbers inside <code>uuid=array([...])</code> and <code>stamp</code> are different for you and are shortened here.) <code>return_code=0</code> means the request was fine, and <code>goals_canceling</code> lists the goal that is being cancelled. Now look at terminal 2. The goal stops at the next phase boundary, so you see the result with status <code>CANCELED</code> within a second or so:</p>
+<pre class="out">Result:
+    success: false
+message: canceled before place
+
+Goal finished with status: CANCELED</pre>
+<p>This is an example of the three phases above: <code>approach</code>, <code>grasp</code> and <code>lift</code> had finished, so the server stopped <em>before</em> <code>place</code>. Terminal 1 logs <code>canceled before place</code>. (A client program cancels through the goal handle, which the next step points out. It is the same <code>cancel_goal</code> service underneath.)</p>
+</li>
+
+<li>
+<h3>Read and run a client</h3>
+<div class="lang py">
+<p>This is <code>code/03-actions/py/client.py</code>:</p>
+<pre class="src" data-file="code/03-actions/py/client.py"><code>#!/usr/bin/env python3
+"""Sends one goal to /execute and prints feedback and result, for example: python3 client.py unstack F W"""
+import sys
+
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from a3_interfaces.action import Execute
+
+
+def main():
+    rclpy.init()
+    node = Node('robot_client')
+    client = ActionClient(node, Execute, 'execute')
+    client.wait_for_server()
+
+    goal = Execute.Goal()
+    goal.name = sys.argv[1]
+    goal.args = sys.argv[2:]
+
+    # 1. send the goal; the feedback callback runs for every feedback message
+    send_future = client.send_goal_async(
+        goal, feedback_callback=lambda msg: print(f'feedback: {msg.feedback.phase} ({msg.feedback.progress:.2f})'))
+    rclpy.spin_until_future_complete(node, send_future)
+    goal_handle = send_future.result()
+    if not goal_handle.accepted:
+        print('goal rejected')
+        return
+
+    # 2. wait for the result
+    result_future = goal_handle.get_result_async()
+    rclpy.spin_until_future_complete(node, result_future)
+    result = result_future.result().result
+    print(f'result: success={result.success} message={result.message}')
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<ul>
+<li><code>ActionClient(node, Execute, 'execute')</code> is the handle for an action. <code>wait_for_server()</code> waits until a server exists.</li>
+<li><code>send_goal_async(goal, feedback_callback=...)</code> sends the goal and returns a <em>future</em> (as in A2). The feedback callback runs for every feedback message that arrives.</li>
+<li>The answer to the send is a <em>goal handle</em>. <code>goal_handle.accepted</code> says whether the server accepted the goal.</li>
+<li><code>goal_handle.get_result_async()</code> returns a second future, for the final result, and we wait on that too. The goal handle is also what you would use to cancel: <code>goal_handle.cancel_goal_async()</code>.</li>
+</ul>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/03-actions/cpp/src/client.cpp</code>:</p>
+<pre class="src" data-file="code/03-actions/cpp/src/client.cpp"><code>// Sends one goal to /execute and prints feedback and result, for example: ros2 run a3_actions client unstack F W
+#include &lt;cstdio&gt;
+#include &lt;memory&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "a3_interfaces/action/execute.hpp"
+
+using Execute = a3_interfaces::action::Execute;
+using GoalHandle = rclcpp_action::ClientGoalHandle&lt;Execute&gt;;
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  auto node = rclcpp::Node::make_shared("robot_client");
+  auto client = rclcpp_action::create_client&lt;Execute&gt;(node, "execute");
+  if (!client-&gt;wait_for_action_server(std::chrono::seconds(10))) {
+    RCLCPP_ERROR(node-&gt;get_logger(), "no action server /execute");
+    return 1;
+  }
+
+  Execute::Goal goal;
+  goal.name = argv[1];
+  for (int i = 2; i &lt; argc; ++i) {
+    goal.args.push_back(argv[i]);
+  }
+
+  // The callbacks: the feedback callback runs for every feedback message,
+  // the result callback once, when the goal ends.
+  rclcpp_action::Client&lt;Execute&gt;::SendGoalOptions options;
+  options.feedback_callback =
+    [](GoalHandle::SharedPtr, const std::shared_ptr&lt;const Execute::Feedback&gt; feedback) {
+      std::printf("feedback: %s (%.2f)\n", feedback-&gt;phase.c_str(), feedback-&gt;progress);
+    };
+  options.result_callback = [](const GoalHandle::WrappedResult &amp; wrapped) {
+    std::printf("result: success=%s message=%s\n", wrapped.result-&gt;success ? "True" : "False",
+      wrapped.result-&gt;message.c_str());
+  };
+
+  // 1. send the goal
+  auto goal_future = client-&gt;async_send_goal(goal, options);
+  rclcpp::spin_until_future_complete(node, goal_future);
+  auto goal_handle = goal_future.get();
+  if (!goal_handle) {
+    std::printf("goal rejected\n");
+    return 1;
+  }
+
+  // 2. wait for the result (its callback prints it)
+  auto result_future = client-&gt;async_get_result(goal_handle);
+  rclcpp::spin_until_future_complete(node, result_future);
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<ul>
+<li><code>rclcpp_action::create_client&lt;Execute&gt;(node, "execute")</code> is the handle for an action. <code>wait_for_action_server</code> waits until a server exists.</li>
+<li><code>SendGoalOptions</code> collects the callbacks: <code>feedback_callback</code> runs for every feedback message that arrives, and <code>result_callback</code> runs once at the end. Both are small unnamed functions (lambdas). The options are given when the goal is sent, not later, because feedback can arrive before you have the goal handle. Step 2 only waits for the end.</li>
+<li><code>async_send_goal</code> sends the goal and returns a <em>future</em> (as in A2). The answer is a <em>goal handle</em>; an empty one means the goal was rejected.</li>
+<li><code>async_get_result(goal_handle)</code> returns a second future, for the final result, and we wait on that too. The goal handle is also what you would use to cancel: <code>client-&gt;async_cancel_goal(goal_handle)</code>.</li>
+</ul>
+</div>
+<p><span class="where box">container</span> In terminal 2, run the client, giving the action as words after the program name:</p>
+<div class="lang py"><pre class="cmd"><code>python3 py/client.py unstack F W</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a3_actions client unstack F W</code></pre></div>
+<pre class="out">feedback: approach (0.25)
+feedback: grasp (0.50)
+feedback: lift (0.75)
+feedback: place (1.00)
+result: success=True message=unstack F W: done</pre>
+<p>The lines appear one per second. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 1 to stop the server and type <code>exit</code> in all terminals.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when, with the server running:</p>
+<ul>
+<li><code>ros2 action list -t</code> shows <code>/execute [a3_interfaces/action/Execute]</code>,</li>
+<li>the client prints four feedback lines, one per second, and <code>result: success=True message=unstack F W: done</code>,</li>
+<li>a goal you cancel ends with <code>Goal finished with status: CANCELED</code>.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all three are true.</div>
+
+<h2>5. Exercise</h2>
+<p>With the server running, start the client for <code>unstack F W</code> in terminal 2. About 1.5 seconds later, start a second client in terminal 3 with <code>pickup W</code>. What does the server do with the second goal, and is that sensible for a robot arm?</p>
+<details>
+<summary>Answer</summary>
+<p>Both goals run at the same time and both succeed. In the server's log the second <code>executing</code> line appears 1.5 seconds after the first, and the two <code>done</code> lines come 4 seconds after their own starts:</p>
+<pre class="out">executing: unstack F W
+executing: pickup W
+done: unstack F W
+done: pickup W</pre>
+<p>That is because our goal function accepts every goal and each goal gets its own thread of execution. For an arm this is wrong: one arm cannot do two things at once. A real server rejects a goal while it is busy (the goal function returns <code class="lang py">GoalResponse.REJECT</code><code class="lang cpp">rclcpp_action::GoalResponse::REJECT</code>), or queues it, or cancels the current one first. The client sees a rejected goal as <code>goal rejected</code>, with the check we wrote after sending. Part D will do exactly this for the arm.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>An <strong>action</strong> is for a long job: a <strong>goal</strong> goes in, <strong>feedback</strong> flows while it runs, one <strong>result</strong> comes out, and the client may <strong>cancel</strong>. The <code>.action</code> file has three parts separated by <code>---</code>: goal, result, feedback.</li>
+<li>A goal ends as <code>SUCCEEDED</code>, <code>CANCELED</code> or <code>ABORTED</code>.</li>
+<li>Underneath, an action is three hidden services (send goal, cancel, get result) and two hidden topics (feedback, status).</li>
+<li>The server must stay responsive during the job so a cancel request can arrive: a multi-threaded executor in Python, a worker thread in C++. It checks the cancel flag at safe points.</li>
+<li>Inspect with <code>ros2 action list -t</code>, <code>ros2 action info</code>, send with <code>ros2 action send_goal --feedback</code>.</li>
+</ul>
+
+<nav class="pager">
+<a href="a2-messages-services.html"><small>Previous</small>A2 · Messages and services</a>
+<span class="soon next"><small>Next</small>A4 · Parameters, launch files, packages (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
