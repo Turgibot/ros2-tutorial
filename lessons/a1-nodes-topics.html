@@ -51,7 +51,7 @@
 </figure>
 
 <h2>3. Do it</h2>
-<p>All commands run in a <strong>container shell</strong> (see A0, step 5). Open three terminals on your computer, and in each one go to the <code>ros2-tutorial</code> folder and run <code>docker/run_ros2.sh</code>. Below they are called terminal 1, 2 and 3. The code is in <code>code/01-nodes-topics/</code>, which you already have from <code>git clone</code>.</p>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong> (see A0, step 5). Open three terminals on your computer, and in each one go to the <code>ros2-tutorial</code> folder and run <code>docker/run_ros2.sh</code>.</span><span class="env local">terminal that is set up for ROS 2 (see A0, step 5). Open three terminals on your computer, each in the <code>ros2-tutorial</code> folder.</span> Below they are called terminal 1, 2 and 3. The code is in <code>code/01-nodes-topics/</code>, which you already have from <code>git clone</code>.</p>
 <p>Use the <strong>Python / C++</strong> switch at the top right of the page to choose your language. The choice is remembered for all lessons, and the ideas, commands and outputs are the same in both.</p>
 
 <ol class="steps">
@@ -215,15 +215,16 @@ int main(int argc, char ** argv)
 
 <li>
 <h3>Run the talker</h3>
-<p><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder.</p>
 <div class="lang py">
 <p><span class="where box">container</span> Run the talker:</p>
 <pre class="cmd"><code>cd code/01-nodes-topics/py
 python3 talker.py</code></pre>
 </div>
 <div class="lang cpp">
-<p><span class="where box">container</span> C++ must be compiled before it runs. <code>colcon build</code> is ROS 2's build tool: it reads <code>package.xml</code> (the package name and what it depends on) and <code>CMakeLists.txt</code> (which programs to compile), and puts the result in an <code>install/</code> folder. Lesson A4 explains packages properly; for now just run it:</p>
+<p><span class="where box">container</span> C++ must be compiled before it runs. <code>colcon build</code> is ROS 2's build tool: it reads <code>package.xml</code> (the package name and what it depends on) and <code>CMakeLists.txt</code> (which programs to compile), and puts the result in an <code>install/</code> folder. Lesson A5 explains packages properly; for now just run it:</p>
 <pre class="cmd"><code>cd code/01-nodes-topics/cpp
 colcon build</code></pre>
 <pre class="out">Starting &gt;&gt;&gt; a1_nodes_topics
@@ -243,7 +244,7 @@ listener  talker</pre>
 <pre class="cmd"><code>source install/setup.bash
 ros2 pkg prefix a1_nodes_topics
 ros2 run a1_nodes_topics talker</code></pre>
-<p>The first line printed is the install folder of your package, <code>/workspace/code/01-nodes-topics/cpp/install/a1_nodes_topics</code>: sourcing made ROS 2 aware of it. The talker's output follows, below.</p>
+<p>The first line printed is the install folder of your package, <code>/workspace/code/01-nodes-topics/cpp/install/a1_nodes_topics</code> (on a local install, the same path under the folder where you cloned the course): sourcing made ROS 2 aware of it. The talker's output follows, below.</p>
 <details>
 <summary>Optional: what is a "prefix"?</summary>
 <p>A <strong>prefix</strong> is the root folder a package was installed into: the folder that holds that package's <code>lib/</code>, <code>share/</code> and <code>include/</code> folders. The word comes from the Unix idea of an installation prefix such as <code>/usr</code>. <code>ros2 pkg prefix &lt;package&gt;</code> prints it. Three examples from the course container:</p>
@@ -266,15 +267,16 @@ ros2 run a1_nodes_topics talker</code></pre>
 
 <li>
 <h3>Run the listener</h3>
-<p><span class="where host">host</span> Open terminal 2 and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Open terminal 2 and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 2.</p>
 <div class="lang py">
 <p><span class="where box">container</span> Run the listener:</p>
 <pre class="cmd"><code>cd code/01-nodes-topics/py
 python3 listener.py</code></pre>
 </div>
 <div class="lang cpp">
-<p><span class="where box">container</span> The program was already built in terminal 1, so only source the result (every new container shell must do this) and run it:</p>
+<p><span class="where box">container</span> The program was already built in terminal 1, so only source the result (every new <span class="env docker">container shell</span><span class="env local">terminal</span> must do this) and run it:</p>
 <pre class="cmd"><code>cd code/01-nodes-topics/cpp
 source install/setup.bash
 ros2 run a1_nodes_topics listener</code></pre>
@@ -282,13 +284,14 @@ ros2 run a1_nodes_topics listener</code></pre>
 <pre class="out">[INFO] [1793885476.156936401] [listener]: heard: hello 26
 [INFO] [1793885476.656945033] [listener]: heard: hello 27
 ...</pre>
-<p>The counter starts wherever the talker is, not at 0: the listener only receives what is sent after it starts. Two programs, in two containers, are exchanging messages. Leave both running.</p>
+<p>The counter starts wherever the talker is, not at 0: the listener only receives what is sent after it starts. Two programs, in two <span class="env docker">containers</span><span class="env local">terminals</span>, are exchanging messages. Leave both running.</p>
 </li>
 
 <li>
 <h3>Look from outside</h3>
-<p><span class="where host">host</span> Open terminal 3 and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Open terminal 3 and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 3.</p>
 <p><span class="where box">container</span> Ask ROS 2 what is running:</p>
 <pre class="cmd"><code>ros2 node list
 ros2 topic list</code></pre>

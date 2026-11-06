@@ -66,7 +66,7 @@
 <p>The rule of thumb is the one from A2: a topic for a stream that nobody has to answer, a service for a question that needs an answer. The service and topic messages carry a <strong>goal ID</strong> (the "Goal accepted with ID: ..." you will see below), so that when several clients send goals at once, each one receives only the feedback and result of its own goal.</p>
 
 <h2>3. Do it</h2>
-<p>All commands run in a <strong>container shell</strong> (A0, step 5). You will use up to three terminals. The code is in <code>code/03-actions/</code>. Choose your language with the <strong>Python / C++</strong> switch at the top right.</p>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5). You will use up to three terminals. The code is in <code>code/03-actions/</code>. Choose your language with the <strong>Python / C++</strong> switch at the top right.</p>
 
 <ol class="steps">
 
@@ -89,8 +89,9 @@ float32 progress   # 0.25, 0.5, 0.75, then 1.0</code></pre>
 
 <li>
 <h3>Build</h3>
-<p><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder.</p>
 <p><span class="where box">container</span> Build and source, as in A2:</p>
 <pre class="cmd"><code>cd code/03-actions
 colcon build
@@ -273,8 +274,9 @@ int main(int argc, char ** argv)
 <p><span class="where box">container</span> In terminal 1 (the sourced shell in <code>code/03-actions</code>), start the server:</p>
 <div class="lang py"><pre class="cmd"><code>python3 py/server.py</code></pre></div>
 <div class="lang cpp"><pre class="cmd"><code>ros2 run a3_actions server</code></pre></div>
-<p><span class="where host">host</span> Open terminal 2 and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Open terminal 2 and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 2.</p>
 <p><span class="where box">container</span> Source the build and ask what actions exist:</p>
 <pre class="cmd"><code>cd code/03-actions
 source install/setup.bash
@@ -338,8 +340,9 @@ Goal finished with status: SUCCEEDED</pre>
 <h3>Cancel a goal</h3>
 <p><span class="where box">container</span> In terminal 2, send the goal again, and wait for the second feedback line (<code>grasp</code>):</p>
 <pre class="cmd"><code>ros2 action send_goal --feedback /execute a3_interfaces/action/Execute "{name: unstack, args: [F, W]}"</code></pre>
-<p><span class="where host">host</span> Quickly open terminal 3 and enter a container (do this beforehand, to have it ready):</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Quickly open terminal 3 and enter a container (do this beforehand, to have it ready):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Quickly open terminal 3 (do this beforehand, to have it ready).</p>
 <p><span class="where box">container</span> Cancelling is a call to the hidden <code>cancel_goal</code> service. An all-zero goal ID in the request means "cancel everything":</p>
 <pre class="cmd"><code>cd code/03-actions
 source install/setup.bash
@@ -516,7 +519,7 @@ done: pickup W</pre>
 
 <nav class="pager">
 <a href="a2-messages-services.html"><small>Previous</small>A2 · Messages and services</a>
-<span class="soon next"><small>Next</small>A4 · Parameters, launch files, packages (coming soon)</span>
+<span class="soon next"><small>Next</small>A4 · Parameters and launch files (coming soon)</span>
 </nav>
 </main>
 <footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>

@@ -32,27 +32,35 @@
   });
 })();
 
-// Python / C++ switch: only on pages that have .lang blocks. The choice is remembered across lessons.
+// Header switches (Python/C++ and Docker/Local): only on pages that have matching blocks.
+// Each choice is remembered across lessons. A block is <div class="lang py"> or <div class="env docker">.
 (function () {
-  if (!document.querySelector('.lang')) return;
-  var lang = 'py';
-  try { lang = localStorage.getItem('lang') === 'cpp' ? 'cpp' : 'py'; } catch (e) {}
-  var box = document.createElement('div');
-  box.className = 'langsw';
-  box.setAttribute('role', 'group');
-  box.setAttribute('aria-label', 'Programming language');
-  var buttons = {};
-  function apply(l) {
-    document.body.setAttribute('data-lang', l);
-    for (var k in buttons) buttons[k].setAttribute('aria-pressed', k === l ? 'true' : 'false');
-    try { localStorage.setItem('lang', l); } catch (e) {}
+  var bar = document.createElement('div');
+  bar.className = 'switches';
+  function make(cls, key, label, options) {
+    if (!document.querySelector('.' + cls)) return;
+    var cur = options[0][0];
+    try { var v = localStorage.getItem(key); options.forEach(function (o) { if (o[0] === v) cur = v; }); } catch (e) {}
+    var box = document.createElement('div');
+    box.className = 'langsw';
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', label);
+    var buttons = {};
+    function apply(v) {
+      document.body.setAttribute('data-' + key, v);
+      for (var k in buttons) buttons[k].setAttribute('aria-pressed', k === v ? 'true' : 'false');
+      try { localStorage.setItem(key, v); } catch (e) {}
+    }
+    options.forEach(function (p) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = p[1];
+      b.addEventListener('click', function () { apply(p[0]); });
+      buttons[p[0]] = b; box.appendChild(b);
+    });
+    bar.appendChild(box);
+    apply(cur);
   }
-  [['py', 'Python'], ['cpp', 'C++']].forEach(function (p) {
-    var b = document.createElement('button');
-    b.type = 'button'; b.textContent = p[1];
-    b.addEventListener('click', function () { apply(p[0]); });
-    buttons[p[0]] = b; box.appendChild(b);
-  });
-  document.querySelector('header.site').appendChild(box);
-  apply(lang);
+  make('env', 'env', 'Where ROS 2 runs', [['docker', 'Docker'], ['local', 'Local install']]);
+  make('lang', 'lang', 'Programming language', [['py', 'Python'], ['cpp', 'C++']]);
+  if (bar.children.length) document.querySelector('header.site').appendChild(bar);
 })();

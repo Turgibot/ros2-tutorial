@@ -93,7 +93,7 @@
 </figure>
 
 <h2>3. Do it</h2>
-<p>All commands run in a <strong>container shell</strong> (A0, step 5). You will use two terminals, called 1 and 2. The code is in <code>code/02-messages-services/</code>. Use the <strong>Python / C++</strong> switch at the top right to choose your language. The interfaces are the same for both.</p>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5). You will use two terminals, called 1 and 2. The code is in <code>code/02-messages-services/</code>. Use the <strong>Python / C++</strong> switch at the top right to choose your language. The interfaces are the same for both.</p>
 
 <ol class="steps">
 
@@ -111,7 +111,7 @@ SymbolicAction action
 bool valid
 string reason</code></pre>
 <p>The request is one <code>SymbolicAction</code> (our message, used as a field type). The response has two fields: <code>valid</code> (yes or no) and <code>reason</code> (a sentence).</p>
-<p>The package also needs two small files that say what to generate. You do not need to change them now, lesson A4 explains packages. <code>CMakeLists.txt</code> lists the interface files:</p>
+<p>The package also needs two small files that say what to generate. You do not need to change them now, lesson A5 explains packages. <code>CMakeLists.txt</code> lists the interface files:</p>
 <pre class="src" data-file="code/02-messages-services/interfaces/CMakeLists.txt, the important part"><code>rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SymbolicAction.msg"
   "srv/CheckAction.srv"
@@ -122,8 +122,9 @@ string reason</code></pre>
 
 <li>
 <h3>Build the interfaces</h3>
-<p><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder.</p>
 <p><span class="where box">container</span> Build everything in this lesson's folder, and source the result (as in A1, sourcing tells the shell about the new package):</p>
 <pre class="cmd"><code>cd code/02-messages-services
 colcon build
@@ -195,9 +196,11 @@ string reason</pre>
 
 <li>
 <h3>Send your message on a topic</h3>
-<p>Our message works on any topic, exactly like <code>String</code> in A1. Try it with the command line. <span class="where host">host</span> Open terminal 2 and enter a container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
-<p><span class="where box">container</span> Every new container shell must source the build first. Then listen on a topic called <code>/action</code>, giving the type (the topic does not exist yet, so ROS 2 cannot look it up):</p>
+<p>Our message works on any topic, exactly like <code>String</code> in A1. Try it with the command line.</p>
+<p class="env docker"><span class="where host">host</span> Open terminal 2 and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 2 in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span> Every new <span class="env docker">container shell</span><span class="env local">terminal</span> must source the build first. Then listen on a topic called <code>/action</code>, giving the type (the topic does not exist yet, so ROS 2 cannot look it up):</p>
 <pre class="cmd"><code>cd code/02-messages-services
 source install/setup.bash
 ros2 topic echo /action a2_interfaces/msg/SymbolicAction</code></pre>

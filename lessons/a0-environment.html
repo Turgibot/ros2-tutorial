@@ -11,10 +11,13 @@
 <main>
 
 <h1>A0 · The course environment</h1>
-<p class="lead">Build one Docker image that holds everything the course needs, run it, and prove that it works.</p>
+<p class="lead"><span class="env docker">Build one Docker image that holds everything the course needs, run it, and prove that it works.</span><span class="env local">Install ROS 2 Jazzy, Gazebo, MoveIt 2 and the Kinova software on your own computer, and prove that it works.</span></p>
+<div class="callout"><strong class="t">Two ways to work: pick one</strong>
+Use the <strong>Docker / Local install</strong> switch at the top right of the page. <strong>Docker</strong> (the default) puts everything in one image and leaves your system untouched. <strong>Local install</strong> installs ROS 2 on your computer, which must run <strong>Ubuntu 24.04 or Linux Mint 22</strong> (Mint 22 is built on Ubuntu 24.04, so the same packages work). Only this lesson differs: from A1 on, the lessons are the same for both. The choice is remembered.</div>
 
 <h2>1. Goal</h2>
 <p>At the end of this lesson you will have:</p>
+<div class="env docker">
 <ul>
 <li>a script-verified computer that can run the course,</li>
 <li>a Docker image called <code>ros2-tutorial:jazzy</code> with ROS 2 Jazzy, Gazebo, MoveIt 2 and the Kinova software built in,</li>
@@ -22,10 +25,21 @@
 <li>proof that two containers can exchange ROS 2 messages, and that a window (RViz) opens on your desktop,</li>
 <li>a clear picture of where your files live.</li>
 </ul>
-<p>Nothing here is about robots yet. This is the foundation: if it works, every later lesson works the same way on your computer as on ours.</p>
+</div>
+<div class="env local">
+<ul>
+<li>a script-verified computer that can run the course,</li>
+<li>ROS 2 Jazzy, Gazebo and MoveIt 2 installed from the official packages,</li>
+<li>the Kinova software built from source in <code>~/kortex_ws</code>,</li>
+<li>a terminal that is set up for ROS 2 every time you open it,</li>
+<li>proof that two programs can exchange ROS 2 messages, and that a window (RViz) opens on your desktop.</li>
+</ul>
+</div>
+<p>Nothing here is about robots yet. This is the foundation: if it works, every later lesson works the same way on your computer as on ours, whichever way you chose.</p>
 
 <h2>2. Concepts</h2>
 
+<div class="env docker">
 <h3>Why Docker</h3>
 <p>ROS 2, Gazebo, MoveIt 2 and the Kinova packages must all be the right versions for each other. Installing them by hand on your own system is slow and breaks easily. Docker lets us ship one frozen setup that behaves the same on every computer, and nothing is installed on your own system except Docker itself.</p>
 
@@ -211,8 +225,32 @@ GPU=(); if docker info 2&gt;/dev/null | grep -qi nvidia; then GPU=(--gpus all -e
 </ul>
 </details>
 
+
+</div>
+<div class="env local">
+<h3>What a local install is</h3>
+<p>Instead of a container, the software goes straight onto your computer, in two places:</p>
+<ul>
+<li><strong>Ready-made packages</strong> (ROS 2 itself, Gazebo, MoveIt 2, RViz), installed with <code>apt</code>. They all end up in <code>/opt/ros/jazzy</code>.</li>
+<li><strong>The Kinova software</strong> (<code>ros2_kortex</code>), which has no ready-made package for Jazzy. You download its source and compile it with <code>colcon</code> into a workspace folder, <code>~/kortex_ws</code>.</li>
+</ul>
+<p>A program only finds these folders if your terminal has been told about them. Each folder has a <code>setup.bash</code> script, and running <code>source setup.bash</code> adds that folder to the search paths of the current terminal. In a local install you do this automatically by adding the <code>source</code> lines to <code>~/.bashrc</code>, which every new terminal runs. (The Docker image does the same inside its run script.)</p>
+<h3>Which operating system</h3>
+<p>The Jazzy packages are built for <strong>Ubuntu 24.04 ("noble")</strong>. <strong>Linux Mint 22</strong> is built on Ubuntu 24.04 and uses the same packages. The difference you may meet: Mint calls itself <code>wilma</code> in <code>VERSION_CODENAME</code> but keeps <code>noble</code> in <code>UBUNTU_CODENAME</code>, and the ROS repository only knows <code>noble</code>. The commands below use <code>UBUNTU_CODENAME</code>, so they work on both. Other systems are not covered: use Docker there.</p>
+<h3>What you take on</h3>
+<ul>
+<li>It changes your system: about 10 GB of packages, and the <code>source</code> lines in <code>~/.bashrc</code>.</li>
+<li>Updates to your system can move ROS 2 versions under you. The Docker image is frozen.</li>
+<li>You get native graphics speed for RViz and Gazebo, and there are no containers to think about.</li>
+</ul>
+<div class="callout"><strong class="t">Paths in the lessons</strong>
+The lessons show output from the Docker setup, where your course folder is <code>/workspace</code> and the Kinova workspace is <code>/opt/kortex_ws</code>. In a local install the course folder is wherever you cloned it, and the Kinova workspace is <code>~/kortex_ws</code>, so those paths in outputs look different. The commands are the same.</div>
+
+
+</div>
 <h2>3. Do it</h2>
-<p>Each command block has a <span class="where host">host</span> or <span class="where box">container</span> badge. <em>Host</em> means a normal terminal on your computer. <em>Container</em> means inside the container's shell.</p>
+<div class="env docker"><p>Each command block has a <span class="where host">host</span> or <span class="where box">container</span> badge. <em>Host</em> means a normal terminal on your computer. <em>Container</em> means inside the container's shell.</p></div>
+<div class="env local"><p>Each command block has a <span class="where host">host</span> badge: you type it in a normal terminal on your computer.</p></div>
 
 <ol class="steps">
 
@@ -226,10 +264,37 @@ cd ros2-tutorial</code></pre>
 
 <li>
 <h3>Check your computer</h3>
-<p><span class="where host">host</span> This script checks your operating system, CPU, memory, disk space, Docker, display, GPU and network, and prints one line per check:</p>
-<pre class="cmd"><code>scripts/check_machine.sh</code></pre>
-<p>On a computer that is ready except for the image (which you have not built yet), the output looks like this. Your numbers (cores, RAM, GPU name) will differ.</p>
-<pre class="out">
+<p><span class="where host">host</span> <span class="env docker">This script checks your operating system, CPU, memory, disk space, Docker, display, GPU and network, and prints one line per check:</span><span class="env local">This script checks your operating system, CPU, memory, disk space, display, GPU and network, and prints one line per check. The <code>--local</code> option skips Docker and checks a local ROS 2 install instead:</span></p>
+<pre class="cmd env docker"><code>scripts/check_machine.sh</code></pre>
+<pre class="cmd env local"><code>scripts/check_machine.sh --local</code></pre>
+<p class="env local">Before you install anything, the output looks like this. Your numbers (cores, RAM, GPU name) will differ. The one FAIL is expected: ROS 2 is not installed yet.</p>
+<pre class="out env local">Operating system
+  [PASS] Linux (Ubuntu 24.04.4 LTS)
+
+CPU, memory, disk
+  [PASS] 32 CPU cores
+  [PASS] 60 GB RAM
+  [PASS] 996 GB free in your home folder
+
+Graphics (RViz and Gazebo windows)
+  [PASS] $DISPLAY=:1 (session: x11)
+  [PASS] xauth installed
+  [PASS] /tmp/.X11-unix present
+  [PASS] NVIDIA GPU: NVIDIA GeForce RTX 5080
+
+Network
+  [PASS] can reach https://github.com
+  [PASS] can reach http://packages.ros.org/ros2/ubuntu/dists/noble/InRelease
+
+Local ROS 2 install
+  [PASS] Ubuntu 24.04 base (Ubuntu 24.04.4 LTS)
+  [FAIL] ROS 2 Jazzy is not installed (/opt/ros/jazzy missing): follow lesson A0, local install
+
+Summary
+  1 failure(s), 0 warning(s)
+  Fix the FAIL lines above before continuing.</pre>
+<p class="env docker">On a computer that is ready except for the image (which you have not built yet), the output looks like this. Your numbers (cores, RAM, GPU name) will differ.</p>
+<pre class="out env docker">
 Operating system
   [PASS] Linux (Ubuntu 24.04.4 LTS)
 
@@ -262,22 +327,64 @@ Summary
   This machine can run the course.</pre>
 <ul>
 <li><strong>PASS</strong>: fine.</li>
-<li><strong>WARN</strong>: works, but is not ideal or is optional. The warning above is expected now: the image does not exist yet.</li>
+<li><strong>WARN</strong>: works, but is not ideal or is optional.<span class="env docker"> The warning above is expected now: the image does not exist yet.</span></li>
 <li><strong>FAIL</strong>: the course will not work until you fix it. The script ends with <code>Fix the FAIL lines above before continuing.</code></li>
 </ul>
 <div class="callout warn"><strong class="t">If a line says FAIL</strong>
 <table>
 <tr><th>Message starts with</th><th>What to do</th></tr>
-<tr><td><code>docker is not installed</code></td><td>Do step 3 below.</td></tr>
-<tr><td><code>docker is installed but 'docker info' fails</code></td><td>The Docker service is not running (<code>sudo systemctl start docker</code>), or you are not in the <code>docker</code> group (step 3, last part).</td></tr>
+<tr class="env docker"><td><code>docker is not installed</code></td><td>Do step 3 below.</td></tr>
+<tr class="env docker"><td><code>docker is installed but 'docker info' fails</code></td><td>The Docker service is not running (<code>sudo systemctl start docker</code>), or you are not in the <code>docker</code> group (step 3, last part).</td></tr>
 <tr><td><code>$DISPLAY is not set</code></td><td>Run the script from a terminal inside your desktop session, not from a plain SSH login.</td></tr>
 <tr><td><code>xauth not installed</code></td><td><code>sudo apt install xauth</code></td></tr>
-<tr><td><code>cannot reach ...</code></td><td>Your network, proxy or firewall blocks that address. The image build needs all three.</td></tr>
+<tr><td><code>cannot reach ...</code></td><td>Your network, proxy or firewall blocks that address. The installation needs all of them.</td></tr>
+<tr class="env local"><td><code>not Ubuntu 24.04 or Linux Mint 22</code></td><td>The ROS 2 Jazzy packages are built for Ubuntu 24.04 only. Switch to Docker.</td></tr>
 <tr><td>CPU, RAM or disk lines</td><td>Your computer is below the minimum. See the numbers in the message.</td></tr>
 </table></div>
 </li>
 
-<li>
+<li class="env local">
+<h3>Install ROS 2 Jazzy</h3>
+<p><span class="where host">host</span> These are the commands of the <a href="https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html">official ROS 2 Jazzy install guide</a>. First the tools that add the ROS package source:</p>
+<pre class="cmd"><code>sudo apt update
+sudo apt install -y software-properties-common curl</code></pre>
+<p>On <strong>Ubuntu</strong>, enable the <code>universe</code> repository (Linux Mint has it enabled already, skip this line there):</p>
+<pre class="cmd"><code>sudo add-apt-repository -y universe</code></pre>
+<p>Now add the ROS package source. The last part of the file name picks your system's codename; it uses <code>UBUNTU_CODENAME</code>, which is <code>noble</code> on both Ubuntu 24.04 and Linux Mint 22:</p>
+<pre class="cmd"><code>export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}')
+curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release &amp;&amp; echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb"
+sudo dpkg -i /tmp/ros2-apt-source.deb</code></pre>
+<p>Install ROS 2 (with RViz and the demos) and the build tools the course uses:</p>
+<pre class="cmd"><code>sudo apt update
+sudo apt install -y ros-jazzy-desktop ros-dev-tools git build-essential python3-vcstool python3-colcon-common-extensions python3-rosdep</code></pre>
+<p>This downloads several GB and takes a few minutes. Afterwards the folder <code>/opt/ros/jazzy</code> exists. Try it in the current terminal (<code>source</code> adds ROS 2 to this terminal only, see "What a local install is"):</p>
+<pre class="cmd"><code>source /opt/ros/jazzy/setup.bash
+ros2 --help | head -3</code></pre>
+<div class="callout warn"><strong class="t">Not run by the author</strong>
+The author's computer uses the Docker setup, so installing ROS 2 on it was not repeated for this page. The commands are the official ones, and the <code>UBUNTU_CODENAME</code> codename line was checked (it prints <code>noble</code> on Ubuntu 24.04). If a step fails on your computer, tell us which one.</div>
+</li>
+
+<li class="env local">
+<h3>Build the Kinova software</h3>
+<p><span class="where host">host</span> This does by hand what <code>docker/Dockerfile</code> does when it builds the image. First set up <code>rosdep</code>, the tool that installs the system packages a ROS package needs. (<code>rosdep init</code> prints an error if it was done before: ignore it.)</p>
+<pre class="cmd"><code>sudo rosdep init
+rosdep update</code></pre>
+<p>Download the Kinova source and the packages it depends on into a new workspace folder:</p>
+<pre class="cmd"><code>mkdir -p ~/kortex_ws
+cd ~/kortex_ws
+git clone --branch jazzy https://github.com/Kinovarobotics/ros2_kortex.git src/ros2_kortex
+for f in ros2_kortex.jazzy.repos ros2_kortex-not-released.jazzy.repos simulation.jazzy.repos; do vcs import src --skip-existing --input "src/ros2_kortex/$f"; done</code></pre>
+<p>Install what they need from the system (Gazebo Harmonic, MoveIt 2, ros2_control, and more), then compile. <code>--parallel-workers 6</code> limits how many packages compile at once, because the default can run out of memory:</p>
+<pre class="cmd"><code>source /opt/ros/jazzy/setup.bash
+rosdep install --ignore-src --from-paths src -y -r
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 6
+cd -</code></pre>
+<p>On our test computer, compiling the 76 packages took about 4 minutes and installing the system dependencies about 7 minutes (the Docker build, in step 4 of the other setup, ran exactly these commands). The last <code>cd -</code> takes you back to the course folder.</p>
+<div class="callout warn"><strong class="t">Linux Mint</strong>
+If <code>rosdep install</code> says the operating system is not supported, run it as <code>ROS_OS_OVERRIDE=ubuntu:24.04:noble rosdep install ...</code> (same arguments). This tells <code>rosdep</code> to treat Mint as the Ubuntu it is built on. Not tested by the author.</div>
+</li>
+
+<li class="env docker">
 <h3>Install Docker (only if step 2 told you to)</h3>
 <p><span class="where host">host</span> Install Docker Engine by following Docker's own instructions for your system:
 <a href="https://docs.docker.com/engine/install/ubuntu/">docs.docker.com/engine/install/ubuntu</a>. Then allow your user to run Docker without <code>sudo</code>:</p>
@@ -291,7 +398,7 @@ If you have an NVIDIA GPU and want Gazebo to use it inside containers, install t
 <p>Run <code>scripts/check_machine.sh</code> again until there are no FAIL lines.</p>
 </li>
 
-<li>
+<li class="env docker">
 <h3>Build the image</h3>
 <p><span class="where host">host</span> This reads <code>docker/Dockerfile</code> (a recipe: start from the official ROS 2 Jazzy image, install tools, download and compile the Kinova packages) and builds the image:</p>
 <pre class="cmd"><code>docker build -t ros2-tutorial:jazzy docker/</code></pre>
@@ -305,7 +412,46 @@ ros2-tutorial   jazzy     8.65GB</pre>
 <p>If the build stops with <code>Killed</code>, the computer ran out of memory while compiling. Close other programs and run the build command again: finished steps are cached and are not repeated.</p>
 </li>
 
-<li>
+<li class="env local">
+<h3>Set up your terminal</h3>
+<p><span class="where host">host</span> Make every new terminal ready for ROS 2 by adding four lines to <code>~/.bashrc</code>, the file bash runs when a terminal opens: the two <code>source</code> lines from "What a local install is", the message-transport library the course uses, and the ROS domain (<code>0</code> unless you set it before):</p>
+<pre class="cmd"><code>echo 'source /opt/ros/jazzy/setup.bash' &gt;&gt; ~/.bashrc
+echo 'source ~/kortex_ws/install/setup.bash' &gt;&gt; ~/.bashrc
+echo 'export RMW_IMPLEMENTATION=rmw_fastrtps_cpp' &gt;&gt; ~/.bashrc
+echo 'export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}' &gt;&gt; ~/.bashrc</code></pre>
+<p>Open a <strong>new terminal</strong> (old ones do not re-read the file) and try three commands:</p>
+<pre class="cmd"><code>echo $RMW_IMPLEMENTATION
+echo $ROS_DOMAIN_ID
+ros2 pkg prefix kortex_bringup</code></pre>
+<pre class="out">rmw_fastrtps_cpp
+0
+/home/YOURNAME/kortex_ws/install/kortex_bringup</pre>
+<p>The last line shows that the Kinova software is found. <strong>From now on, whenever a lesson says "open a terminal", open a new terminal window or tab on your computer, go to the <code>ros2-tutorial</code> folder, and type the lesson's commands there.</strong> There is no container: it is your normal terminal.</p>
+<p>List the ROS 2 <em>topics</em> that currently exist:</p>
+<pre class="cmd"><code>ros2 topic list</code></pre>
+<pre class="out">/parameter_events
+/rosout</pre>
+<p>Only the two built-in topics appear, because nothing else is running. The next step creates a third.</p>
+<h4>Look inside the Kinova workspace</h4>
+<p>The build you ran in step 4 left this behind:</p>
+<pre class="cmd"><code>ls ~/kortex_ws</code></pre>
+<pre class="out">build
+install
+log
+src</pre>
+<p>This is what every <code>colcon build</code> creates, and you will see it again in your own code:</p>
+<ul>
+<li><code>src</code>: the source code that was downloaded (<code>ros2_kortex</code> and its dependencies). This is where code you write or edit lives.</li>
+<li><code>build</code>: scratch files of the compiler. Safe to delete; it only makes the next build slower.</li>
+<li><code>install</code>: the finished, runnable result. This is the folder that <code>setup.bash</code> (sourced from your <code>~/.bashrc</code>) points ROS 2 at.</li>
+<li><code>log</code>: the compiler output of each build, useful when a build fails.</li>
+</ul>
+<p>Lesson A1 builds a small program of your own and shows where its files land.</p>
+<div class="callout warn"><strong class="t">Not run by the author</strong>
+The blocks in this step were not run on a computer with a local install, so the last path in the first output is written as <code>/home/YOURNAME/...</code>. The same commands run inside the Docker image give the same results with <code>/opt/kortex_ws</code> paths.</div>
+</li>
+
+<li class="env docker">
 <h3>Open a shell in the container</h3>
 <p><span class="where host">host</span> Start a container and get a shell inside it:</p>
 <pre class="cmd"><code>docker/run_ros2.sh</code></pre>
@@ -345,40 +491,41 @@ The run script can also run one command without opening a shell: everything afte
 </li>
 
 <li>
-<h3>Make two containers talk</h3>
-<p>A <em>topic</em> is a named channel: one program <em>publishes</em> messages to it, others <em>subscribe</em> and receive them. Lesson A1 explains this properly. Here we only use it to prove that two separate containers can reach each other.</p>
-<p><span class="where box">container</span> In terminal 1 (the shell you just opened), publish the text <code>hello from container 1</code> twice a second on a topic named <code>/hello</code>:</p>
+<h3><span class="env docker">Make two containers talk</span><span class="env local">Make two programs talk</span></h3>
+<p>A <em>topic</em> is a named channel: one program <em>publishes</em> messages to it, others <em>subscribe</em> and receive them. Lesson A1 explains this properly. Here we only use it to prove that two separate <span class="env docker">containers</span><span class="env local">programs</span> can reach each other.</p>
+<p><span class="where box env docker">container</span><span class="where host env local">host</span> In terminal 1 (the <span class="env docker">shell</span><span class="env local">terminal</span> you just opened), publish the text <code>hello from container 1</code> twice a second on a topic named <code>/hello</code>:</p>
 <pre class="cmd"><code>ros2 topic pub -r 2 /hello std_msgs/msg/String "{data: 'hello from container 1'}"</code></pre>
 <pre class="out">publisher: beginning loop
 publishing #1: std_msgs.msg.String(data='hello from container 1')
 
 publishing #2: std_msgs.msg.String(data='hello from container 1')
 ...</pre>
-<p><span class="where host">host</span> Open a <strong>second terminal</strong> (a new window or tab, in the <code>ros2-tutorial</code> folder) and enter a second container:</p>
-<pre class="cmd"><code>docker/run_ros2.sh</code></pre>
-<p><span class="where box">container</span> Listen on the same topic:</p>
+<p class="env docker"><span class="where host">host</span> Open a <strong>second terminal</strong> (a new window or tab, in the <code>ros2-tutorial</code> folder) and enter a second container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env docker"><span class="where box">container</span> Listen on the same topic:</p>
+<p class="env local"><span class="where host">host</span> Open a <strong>second terminal</strong> (a new window or tab) and listen on the same topic:</p>
 <pre class="cmd"><code>ros2 topic echo /hello</code></pre>
 <pre class="out">data: hello from container 1
 ---
 data: hello from container 1
 ---
 ...</pre>
-<p>Each <code>---</code> separates one message. You now have two containers exchanging data. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals to stop the commands. The shells stay open.</p>
+<p>Each <code>---</code> separates one message. You now have two <span class="env docker">containers</span><span class="env local">programs</span> exchanging data. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals to stop the commands. The <span class="env docker">shells</span><span class="env local">terminals</span> stay open.</p>
 </li>
 
 <li>
-<h3>Open a window from the container</h3>
-<p><span class="where box">container</span> RViz is ROS 2's 3D viewer. In a container shell, start it:</p>
+<h3>Open a window <span class="env docker">from the container</span></h3>
+<p><span class="where box env docker">container</span><span class="where host env local">host</span> RViz is ROS 2's 3D viewer. In <span class="env docker">a container shell</span><span class="env local">a terminal</span>, start it:</p>
 <pre class="cmd"><code>rviz2</code></pre>
 <p>A window appears on your desktop after a few seconds, like this:</p>
 <figure>
 <img src="img/a0-rviz-first-window.png" alt="The RViz window: a Displays panel on the left with Global Options and a Grid, a dark 3D view with a grid in the middle, and a Views panel on the right. The status bar reads 'RViz is ready.'" width="628">
-<figcaption>RViz, started inside the container, drawn on your desktop. The orange "No tf data" warning is normal: nothing is publishing robot positions yet. We start doing that in lesson A5.</figcaption>
+<figcaption>RViz, <span class="env docker">started inside the container, </span>drawn on your desktop. The orange "No tf data" warning is normal: nothing is publishing robot positions yet. We start doing that in lesson A6.</figcaption>
 </figure>
-<p>Close the window (or press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal) to stop it. Then type <code>exit</code> in both container shells.</p>
+<p>Close the window (or press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal) to stop it. <span class="env docker">Then type <code>exit</code> in both container shells.</span></p>
 </li>
 
-<li>
+<li class="env docker">
 <h3>See where files live</h3>
 <p><span class="where host">host</span> Open a container shell and create a file from inside it:</p>
 <pre class="cmd"><code>docker/run_ros2.sh</code></pre>
@@ -395,7 +542,7 @@ hi from the container</pre>
 Anything you want to keep must be saved under <code>/workspace</code> (your course folder). Everything else inside a container disappears when it stops.</div>
 </li>
 
-<li>
+<li class="env docker">
 <h3>Stop, rebuild, remove</h3>
 <ul>
 <li><strong>Stop</strong>: type <code>exit</code> in a container shell, or press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal running a command. The container deletes itself. Check that none are left over: <code>docker ps</code> lists running containers.</li>
@@ -407,10 +554,25 @@ Anything you want to keep must be saved under <code>/workspace</code> (your cour
 </ol>
 
 <h2>4. Check</h2>
-<p><span class="where host">host</span> Run the machine check again, now that the image exists:</p>
-<pre class="cmd"><code>scripts/check_machine.sh</code></pre>
-<p>The end of the output must look like this. It also proves, from your own computer, the three things this lesson built: the Kinova packages and Gazebo are in the image, two containers exchange data, and RViz opens a window.</p>
-<pre class="out">Course image (ros2-tutorial:jazzy)
+<p><span class="where host">host</span> Run the machine check again, now that <span class="env docker">the image exists</span><span class="env local">ROS 2 is installed</span>:</p>
+<pre class="cmd env docker"><code>scripts/check_machine.sh</code></pre>
+<pre class="cmd env local"><code>scripts/check_machine.sh --local</code></pre>
+<p class="env local">The end of the output must look like this. It also proves, from your own computer, the things this lesson built: ROS 2, the Kinova packages and Gazebo are installed, two programs exchange data, and RViz opens a window. (The Kinova path shows your own home folder.)</p>
+<pre class="out env local">Local ROS 2 install
+  [PASS] Ubuntu 24.04 base (Ubuntu 24.04.5 LTS)
+  [PASS] ROS 2 Jazzy is installed in /opt/ros/jazzy
+  [PASS] Kinova packages are built (/home/YOURNAME/kortex_ws)
+  [PASS] Gazebo and gz_ros2_control are installed
+  [PASS] two ROS 2 programs exchange topic data
+  [PASS] RViz opens a window
+
+Summary
+  0 failure(s), 0 warning(s)
+  This machine can run the course.</pre>
+<div class="callout warn env local"><strong class="t">Run in the Docker image</strong>
+This output was produced by running the script with <code>--local</code> inside the course container, which has the same software installed in the same way (ROS 2 in <code>/opt/ros/jazzy</code>). The path shown was <code>/opt/kortex_ws</code>. It was not run on a computer with a local install. A warning about a missing NVIDIA GPU is fine.</div>
+<p class="env docker">The end of the output must look like this. It also proves, from your own computer, the three things this lesson built: the Kinova packages and Gazebo are in the image, two containers exchange data, and RViz opens a window.</p>
+<pre class="out env docker">Course image (ros2-tutorial:jazzy)
   [PASS] image present (8.65GB)
   [PASS] Kinova packages are in the image
   [PASS] Gazebo and gz_ros2_control are in the image
@@ -423,29 +585,34 @@ Summary
 <div class="callout ok"><strong class="t">Done when</strong> the summary says <code>0 failure(s)</code> and <code>This machine can run the course.</code></div>
 
 <h2>5. Exercise</h2>
-<p>Run the publisher from step 6 again in a container shell (terminal 1). Then, in terminal 2, start a container in a <em>different ROS domain</em> and listen:</p>
-<pre class="cmd"><code>ROS_DOMAIN_ID=5 docker/run_ros2.sh</code></pre>
-<pre class="cmd"><code>ros2 topic echo /hello</code></pre>
+<p>Run the publisher from step 6 again in <span class="env docker">a container shell</span><span class="env local">a terminal</span> (terminal 1). Then, in terminal 2, listen in a <em>different ROS domain</em>:</p>
+<pre class="cmd env docker"><code>ROS_DOMAIN_ID=5 docker/run_ros2.sh</code></pre>
+<pre class="cmd env docker"><code>ros2 topic echo /hello</code></pre>
+<pre class="cmd env local"><code>ROS_DOMAIN_ID=5 ros2 topic echo /hello</code></pre>
 <p>What do you see, and why? What one change makes the messages arrive?</p>
 <details>
 <summary>Answer</summary>
 <p>No messages arrive. After a few seconds you get:</p>
 <pre class="out">WARNING: topic [/hello] does not appear to be published yet
 Could not determine the type for the passed topic</pre>
-<p>The publisher is in domain <code>0</code> (the default) and the listener is in domain <code>5</code>. Programs in different domains cannot see each other at all, so the listener does not even know the topic exists. Run both with the same number, for example by starting the publisher's container with <code>ROS_DOMAIN_ID=5 docker/run_ros2.sh</code> too, and the messages arrive. In practice this is how you keep several people's or several robots' ROS 2 programs from interfering on one network.</p>
-<p>You can confirm that domain 5 is empty. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> and, in the same domain-5 shell, list the topics. Only the two built-in ones appear:</p>
-<pre class="cmd"><code>ros2 topic list</code></pre>
+<p>The publisher is in domain <code>0</code> (the default) and the listener is in domain <code>5</code>. Programs in different domains cannot see each other at all, so the listener does not even know the topic exists. Run both with the same number, for example by starting the publisher with <span class="env docker"><code>ROS_DOMAIN_ID=5 docker/run_ros2.sh</code></span><span class="env local"><code>ROS_DOMAIN_ID=5 ros2 topic pub ...</code></span> too, and the messages arrive. In practice this is how you keep several people's or several robots' ROS 2 programs from interfering on one network.</p>
+<p>You can confirm that domain 5 is empty. <span class="env docker">Press <kbd>Ctrl</kbd>+<kbd>C</kbd> and, in the same domain-5 shell, list the topics.</span><span class="env local">List the topics in domain 5.</span> Only the two built-in ones appear:</p>
+<pre class="cmd env docker"><code>ros2 topic list</code></pre>
+<pre class="cmd env local"><code>ROS_DOMAIN_ID=5 ros2 topic list</code></pre>
 <pre class="out">/parameter_events
 /rosout</pre>
 </details>
 
 <h2>6. Recap</h2>
 <ul class="recap">
-<li>An <strong>image</strong> is the frozen system (8.65 GB); a <strong>container</strong> is a running copy that is deleted on exit.</li>
-<li>Our image holds ROS 2 Jazzy, Gazebo Harmonic, MoveIt 2 and the Kinova workspace. You build it with <code>docker build -t ros2-tutorial:jazzy docker/</code> and enter it with <code>docker/run_ros2.sh</code>.</li>
-<li>Only <code>/workspace</code> (your course folder) survives. Everything else is lost when the container stops.</li>
-<li>Containers see each other when they share the host network and the same <code>ROS_DOMAIN_ID</code>, and use UDP because shared memory cannot cross containers.</li>
-<li><code>scripts/check_machine.sh</code> is the one command to run whenever something seems wrong with the environment.</li>
+<li class="env docker">An <strong>image</strong> is the frozen system (8.65 GB); a <strong>container</strong> is a running copy that is deleted on exit.</li>
+<li class="env docker">Our image holds ROS 2 Jazzy, Gazebo Harmonic, MoveIt 2 and the Kinova workspace. You build it with <code>docker build -t ros2-tutorial:jazzy docker/</code> and enter it with <code>docker/run_ros2.sh</code>.</li>
+<li class="env docker">Only <code>/workspace</code> (your course folder) survives. Everything else is lost when the container stops.</li>
+<li class="env docker">Containers see each other when they share the host network and the same <code>ROS_DOMAIN_ID</code>, and use UDP because shared memory cannot cross containers.</li>
+<li class="env local">A local install has ROS 2 in <code>/opt/ros/jazzy</code> (from <code>apt</code>) and the Kinova software in <code>~/kortex_ws</code> (built with <code>colcon</code>). It works on Ubuntu 24.04 and Linux Mint 22.</li>
+<li class="env local">A terminal finds them only after <code>source setup.bash</code>. Your <code>~/.bashrc</code> does it for every new terminal.</li>
+<li class="env local">Programs see each other when they use the same <code>ROS_DOMAIN_ID</code>.</li>
+<li><code>scripts/check_machine.sh</code> (with <code>--local</code> for a local install) is the one command to run whenever something seems wrong with the environment.</li>
 </ul>
 
 <nav class="pager">

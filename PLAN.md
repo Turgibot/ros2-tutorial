@@ -38,9 +38,10 @@ Rules: one new idea at a time; nothing used before it is taught; every number/fo
 - A1 Nodes and topics: a talker/listener in Python; `ros2 node/topic list/echo`.
 - A2 Messages and services: custom message for a symbolic action (`unstack F W`); a service call.
 - A3 Actions: long-running goals with feedback and cancel (what a pick-and-place will be).
-- A4 Parameters and launch files; packages, `colcon build`, workspaces.
-- A5 Frames and TF2: what a coordinate frame is, `base_link`, tool frame, viewing in RViz.
-- A6 ros2_control in one lesson: controllers, joint states, command interfaces (concept only).
+- A4 Parameters and launch files.
+- A5 Packages and workspaces: `package.xml`, `CMakeLists.txt`/`setup.py`, `colcon build`, overlays, sourcing order.
+- A6 Frames and TF2: what a coordinate frame is, `base_link`, tool frame, viewing in RViz.
+- A7 ros2_control in one lesson: controllers, joint states, command interfaces (concept only).
 
 **Part B, the Kinova Gen3, milestone 1**
 - B0 Setup of the Kinova workspace: what `ros2_kortex` is, how the Dockerfile builds it (`vcs import`, `rosdep install`,

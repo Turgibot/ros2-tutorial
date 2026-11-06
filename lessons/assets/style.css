@@ -89,6 +89,11 @@ footer.site { color: var(--muted); font-size: .85rem; padding-bottom: 2rem; }
 
 /* Python / C++ switch: body[data-lang] picks which variant shows (default: Python) */
 body[data-lang="py"] .lang.cpp, body[data-lang="cpp"] .lang.py { display: none; }
-header.site .langsw { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+/* in a local install there is no container: relabel the container badge as "terminal" */
+body[data-env="local"] .where.box { font-size: 0; }
+body[data-env="local"] .where.box::after { content: "terminal"; font-size: .7rem; }
+body[data-env="docker"] .env.local, body[data-env="local"] .env.docker { display: none; }
+header.site .switches { margin-left: auto; display: flex; gap: .6rem; flex-wrap: wrap; }
+header.site .langsw { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 header.site .langsw button { font: inherit; font-size: .85rem; padding: .2rem .7rem; border: 0; background: transparent; color: var(--fg); cursor: pointer; }
 header.site .langsw button[aria-pressed="true"] { background: var(--accent); color: #fff; }
