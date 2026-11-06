@@ -1,0 +1,12 @@
+# Settings for the two announcers started by launch/announcers.launch.py.
+# The top-level key is the node name; parameters go under ros__parameters.
+planner_a:
+  ros__parameters:
+    name: unstack
+    args: [F, W]
+    rate_hz: 2.0
+planner_b:
+  ros__parameters:
+    name: putdown
+    args: [F]
+    rate_hz: 1.0

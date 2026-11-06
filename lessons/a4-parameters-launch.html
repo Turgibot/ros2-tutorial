@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A4 · Parameters and launch files</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A4 · Parameters and launch files</h1>
+<p class="lead">Change how a node behaves without editing its code, and start a whole group of nodes with one command.</p>
+
+<h2>1. Goal</h2>
+<p>So far every program had its settings written into the code: the A1 talker always sent every half second. A robot system needs the opposite. The same program must run with different settings (another arm, another speed), and starting ten nodes by hand in ten terminals does not scale. ROS 2 answers with <strong>parameters</strong> and <strong>launch files</strong>.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>written a node, the <strong>announcer</strong>, whose behaviour (which action it announces, and how often) is set by parameters,</li>
+<li>read and changed those parameters from outside while the node runs, and set them when it starts, from the command line and from a YAML file,</li>
+<li>written a <strong>launch file</strong> that starts two announcers and a listener, each with its own settings, with one command,</li>
+<li>looked at the arguments of the launch file that starts the Kinova arm.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>Parameters</h3>
+<p>A <strong>parameter</strong> is a named, typed setting that belongs to one node. The announcer will have three:</p>
+<table>
+<tr><th>Name</th><th>Type</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>name</code></td><td>string</td><td><code>pickup</code></td><td>the symbolic action to announce</td></tr>
+<tr><td><code>args</code></td><td>list of strings</td><td><code>[A]</code></td><td>its arguments (the blocks)</td></tr>
+<tr><td><code>rate_hz</code></td><td>float (a "double")</td><td><code>1.0</code></td><td>how many times per second to announce it</td></tr>
+</table>
+<ul>
+<li>A node <strong>declares</strong> each parameter with a default value. Declaring also fixes the type: a float parameter cannot later become a string.</li>
+<li>Anyone can read and change a node's parameters while it runs, with <code>ros2 param</code>, and the node can check a change and refuse it.</li>
+<li>Values can also be given when the node starts, one by one or from a YAML file.</li>
+</ul>
+<p>Why not a topic? A topic is a stream that flows all the time. A setting is different: it belongs to one node, changes rarely, must exist before the node does its first job (the default), and you want to list, read and change it by name. You will see in step 4 that, like actions in A3, parameters are built from services: every node gets <code>get_parameters</code>, <code>set_parameters</code> and so on.</p>
+
+<h3>Launch files</h3>
+<p>A <strong>launch file</strong> describes a group of nodes to start together: which program, under which node name, with which parameters. <code>ros2 launch</code> reads it, starts everything, shows all the output in one terminal, and stops everything on <kbd>Ctrl</kbd>+<kbd>C</kbd>. Launch files are Python programs that build a description (<code>LaunchDescription</code>); the nodes themselves can be Python or C++.</p>
+<p>A launch file can have its own <strong>arguments</strong>, like <code>gripper:=robotiq_2f_85</code> in the Kinova launch file. They are settings of the launch file itself: they decide what gets started, or what value a node gets.</p>
+<div class="callout"><strong class="t">Why there is a package this time</strong>
+<code>ros2 run</code> and <code>ros2 launch</code> only find programs that were <em>installed</em> by a build, as you saw for C++ in A1. So this lesson's code is one package, <code>a4_params</code>, that installs both the Python programs (copied as they are) and the C++ programs, plus the launch and YAML files. How a package is put together is the subject of A5.</div>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5). You will use up to three terminals. The code is in <code>code/04-parameters-launch/</code>. Choose your language with the <strong>Python / C++</strong> switch at the top right.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Read the announcer</h3>
+<div class="lang py">
+<p>This is <code>code/04-parameters-launch/py/announcer.py</code>:</p>
+<pre class="src" data-file="code/04-parameters-launch/py/announcer.py"><code>#!/usr/bin/env python3
+"""Publishes a symbolic action (name and arguments) as text on /action. Its settings are parameters."""
+import rclpy
+from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
+from std_msgs.msg import String
+
+
+class Announcer(Node):
+    def __init__(self):
+        super().__init__('announcer')
+        # Declare each parameter with a default value (this also fixes its type).
+        self.declare_parameter('name', 'pickup')
+        self.declare_parameter('args', ['A'])
+        self.declare_parameter('rate_hz', 1.0)
+
+        self.pub = self.create_publisher(String, 'action', 10)
+        self.timer = self.create_timer(1.0 / self.get_parameter('rate_hz').value, self.tick)
+        self.add_on_set_parameters_callback(self.on_change)   # called before a new value is accepted
+
+    def on_change(self, params):
+        for p in params:
+            if p.name == 'rate_hz':
+                if p.value &lt;= 0.0:
+                    return SetParametersResult(successful=False, reason='rate_hz must be positive')
+                self.destroy_timer(self.timer)   # restart the timer with the new period
+                self.timer = self.create_timer(1.0 / p.value, self.tick)
+        return SetParametersResult(successful=True)
+
+    def tick(self):
+        words = [self.get_parameter('name').value] + list(self.get_parameter('args').value)
+        msg = String()
+        msg.data = ' '.join(words)
+        self.pub.publish(msg)
+        self.get_logger().info(f'sent: {msg.data}')
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Announcer())
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+<ul>
+<li><code>declare_parameter('name', 'pickup')</code> creates a parameter with its default value. The default also decides the type: <code>1.0</code> makes <code>rate_hz</code> a float, <code>['A']</code> makes <code>args</code> a list of strings.</li>
+<li><code>get_parameter('rate_hz').value</code> reads the current value. <code>tick</code> reads <code>name</code> and <code>args</code> every time it runs, so changing them takes effect on the next message with no extra code.</li>
+<li><code>add_on_set_parameters_callback(self.on_change)</code> registers a function that is called <em>before</em> a new value is accepted. It returns <code>SetParametersResult(successful=...)</code>: here a rate that is not positive is refused with a reason. An accepted new rate restarts the timer with the new period, because a timer does not notice a changed parameter by itself.</li>
+</ul>
+</div>
+<div class="lang cpp">
+<p>This is <code>code/04-parameters-launch/cpp/announcer.cpp</code>:</p>
+<pre class="src" data-file="code/04-parameters-launch/cpp/announcer.cpp"><code>// Publishes a symbolic action (name and arguments) as text on /action. Its settings are parameters.
+#include &lt;chrono&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
+
+using OnSetParametersCallbackHandle = rclcpp::node_interfaces::OnSetParametersCallbackHandle;
+
+class Announcer : public rclcpp::Node
+{
+public:
+  Announcer() : Node("announcer")
+  {
+    // Declare each parameter with a default value (this also fixes its type).
+    declare_parameter("name", "pickup");
+    declare_parameter("args", std::vector&lt;std::string&gt;{"A"});
+    declare_parameter("rate_hz", 1.0);
+
+    pub_ = create_publisher&lt;std_msgs::msg::String&gt;("action", 10);
+    start_timer(get_parameter("rate_hz").as_double());
+    // Called before a new value is accepted.
+    // Keep the handle in a member, or the callback is removed.
+    callback_handle_ = add_on_set_parameters_callback(
+      [this](const std::vector&lt;rclcpp::Parameter&gt; &amp; params) {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        for (const auto &amp; p : params) {
+          if (p.get_name() == "rate_hz") {
+            if (p.as_double() &lt;= 0.0) {
+              result.successful = false;
+              result.reason = "rate_hz must be positive";
+            } else {
+              start_timer(p.as_double());   // restart with the new period
+            }
+          }
+        }
+        return result;
+      });
+  }
+
+private:
+  void start_timer(double rate_hz)
+  {
+    timer_ = create_wall_timer(
+      std::chrono::duration&lt;double&gt;(1.0 / rate_hz), [this]() { tick(); });
+  }
+
+  void tick()
+  {
+    std_msgs::msg::String msg;
+    msg.data = get_parameter("name").as_string();
+    // Copy the list into a variable first:
+    // get_parameter returns a temporary object.
+    std::vector&lt;std::string&gt; args = get_parameter("args").as_string_array();
+    for (const auto &amp; arg : args) {
+      msg.data += " " + arg;
+    }
+    pub_-&gt;publish(msg);
+    RCLCPP_INFO(get_logger(), "sent: %s", msg.data.c_str());
+  }
+
+  rclcpp::Publisher&lt;std_msgs::msg::String&gt;::SharedPtr pub_;
+  rclcpp::TimerBase::SharedPtr timer_;
+  OnSetParametersCallbackHandle::SharedPtr callback_handle_;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Announcer&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+<ul>
+<li><code>declare_parameter("name", "pickup")</code> creates a parameter with its default value. The default also decides the type: <code>1.0</code> makes <code>rate_hz</code> a double, a vector of strings makes <code>args</code> a list of strings.</li>
+<li><code>get_parameter("rate_hz").as_double()</code> reads the current value. <code>tick</code> reads <code>name</code> and <code>args</code> every time it runs, so changing them takes effect on the next message with no extra code.</li>
+<li><code>add_on_set_parameters_callback(...)</code> registers a function that is called <em>before</em> a new value is accepted. It fills in a <code>SetParametersResult</code>: here a rate that is not positive is refused with a reason. An accepted new rate restarts the timer with the new period, because a timer does not notice a changed parameter by itself.</li>
+<li>Like the publisher and the timer, the handle that <code>add_on_set_parameters_callback</code> returns is kept in a member (<code>callback_handle_</code>). It is the handle lifetime rule of A1 again: drop it and the callback is removed.</li>
+<li><code>args</code> is copied into a variable before the loop. <code>get_parameter("args")</code> returns a temporary object, and looping directly over something inside it uses memory that is already gone. When we wrote this lesson, that mistake crashed the program with <code>std::length_error</code>, not with a clear message.</li>
+</ul>
+</div>
+<p>The listener (<code class="lang py">py/listener.py</code><code class="lang cpp">cpp/listener.cpp</code>) is the A1 listener, subscribed to <code>action</code>.</p>
+</li>
+
+<li>
+<h3>Build</h3>
+<p class="env docker"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open terminal 1 in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span> Build and source, as in A3:</p>
+<pre class="cmd"><code>cd code/04-parameters-launch
+colcon build
+source install/setup.bash</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; a4_params
+Finished &lt;&lt;&lt; a4_params [4.23s]
+
+Summary: 1 package finished [4.28s]</pre>
+<div class="callout warn"><strong class="t">Warnings about paths that "don't exist"?</strong>
+If the build prints lines like <code>WARNING:colcon...: The path '/workspace/code/02-messages-services/install' in the environment variable COLCON_PREFIX_PATH doesn't exist</code>, this shell still has an earlier lesson sourced, and you have since deleted that lesson's <code>install</code> folder. The build still works. To get rid of them, type <code>exit</code> and open a fresh shell: every <code>source install/setup.bash</code> stays in the shell where you ran it, and adds to that shell's search paths.</div>
+<p>List the programs the package installed:</p>
+<pre class="cmd"><code>ros2 pkg executables a4_params</code></pre>
+<pre class="out">a4_params announcer
+a4_params announcer.py
+a4_params listener
+a4_params listener.py</pre>
+<p>The names with <code>.py</code> are the Python programs, the others the C++ ones.</p>
+</li>
+
+<li>
+<h3>Run with the defaults</h3>
+<div class="lang py"><pre class="cmd"><code>ros2 run a4_params announcer.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a4_params announcer</code></pre></div>
+<pre class="out">[INFO] [1793967382.410584252] [announcer]: sent: pickup A
+[INFO] [1793967383.404441170] [announcer]: sent: pickup A
+...</pre>
+<p>One <code>pickup A</code> per second: the defaults. Leave it running.</p>
+</li>
+
+<li>
+<h3>Read the parameters from outside</h3>
+<p><span class="where host">host</span> Open terminal 2 in the <code>ros2-tutorial</code> folder<span class="env docker"> and enter a container with <code>docker/run_ros2.sh</code></span>. <span class="where box">container</span> Source the build, then list the node's parameters:</p>
+<pre class="cmd"><code>cd code/04-parameters-launch
+source install/setup.bash
+ros2 param list</code></pre>
+<div class="lang py"><pre class="out">/announcer:
+  args
+  name
+  rate_hz
+  start_type_description_service
+  use_sim_time</pre></div>
+<div class="lang cpp"><pre class="out">/announcer:
+  args
+  name
+  qos_overrides./parameter_events.publisher.depth
+  qos_overrides./parameter_events.publisher.durability
+  qos_overrides./parameter_events.publisher.history
+  qos_overrides./parameter_events.publisher.reliability
+  rate_hz
+  start_type_description_service
+  use_sim_time</pre></div>
+<p>Our three are there, together with parameters that every node gets for free: <code>use_sim_time</code> (used with Gazebo in Part C) and <code>start_type_description_service</code>. <span class="lang cpp">C++ nodes also show the <code>qos_overrides</code> entries.</span> Read the values, and ask what one means:</p>
+<pre class="cmd"><code>ros2 param get /announcer name
+ros2 param get /announcer args
+ros2 param get /announcer rate_hz
+ros2 param describe /announcer rate_hz</code></pre>
+<pre class="out">String value is: pickup
+String values are: ['A']
+Double value is: 1.0
+Parameter name: rate_hz
+  Type: double
+  Constraints:</pre>
+<p>The same information is available as services. Look at the ones the node has for its parameters:</p>
+<pre class="cmd"><code>ros2 service list | grep announcer</code></pre>
+<pre class="out">/announcer/describe_parameters
+/announcer/get_parameter_types
+/announcer/get_parameters
+/announcer/get_type_description
+/announcer/list_parameters
+/announcer/set_parameters
+/announcer/set_parameters_atomically</pre>
+<p><code>ros2 param get</code> is a client of <code>get_parameters</code>, and <code>ros2 param set</code> (next) of <code>set_parameters</code>.</p>
+</li>
+
+<li>
+<h3>Change them while it runs</h3>
+<p>Measure the current rate, change it, and measure again. <kbd>Ctrl</kbd>+<kbd>C</kbd> ends each <code>hz</code> measurement after a few lines:</p>
+<pre class="cmd"><code>ros2 topic hz /action</code></pre>
+<pre class="out">average rate: 1.000
+	min: 1.000s max: 1.000s std dev: 0.00001s window: 2</pre>
+<pre class="cmd"><code>ros2 param set /announcer rate_hz 4.0
+ros2 topic hz /action</code></pre>
+<pre class="out">Set parameter successful
+average rate: 4.000
+	min: 0.250s max: 0.250s std dev: 0.00010s window: 19</pre>
+<p>Terminal 1 now prints four lines per second, and no program was restarted. Change what is announced:</p>
+<pre class="cmd"><code>ros2 param set /announcer name stack
+ros2 param set /announcer args "[F, W]"</code></pre>
+<pre class="out">Set parameter successful
+Set parameter successful</pre>
+<p>Terminal 1 now shows <code>sent: stack F W</code>. Now try three changes that must fail. The first is refused by our callback, the second by the type fixed at declaration, the third because the parameter was never declared:</p>
+<pre class="cmd"><code>ros2 param set /announcer rate_hz -1.0
+ros2 param set /announcer rate_hz 3
+ros2 param set /announcer color red</code></pre>
+<div class="lang py"><pre class="out">Setting parameter failed: rate_hz must be positive
+Setting parameter failed: Wrong parameter type, expected 'Type.DOUBLE' got 'Type.INTEGER'
+Setting parameter failed: Invalid access to undeclared parameter(s): []</pre></div>
+<div class="lang cpp"><pre class="out">Setting parameter failed: rate_hz must be positive
+Setting parameter failed: Wrong parameter type, parameter {rate_hz} is of type {double}, setting it to {integer} is not allowed.
+Setting parameter failed: parameter 'color' cannot be set because it was not declared</pre></div>
+<p>The second one trips people up: <code>3</code> is an integer, <code>3.0</code> is a float. (The wording of these messages differs between the two languages, the rules do not.) A refused change leaves the old value in place.</p>
+<p>Print everything the node currently has, as YAML:</p>
+<pre class="cmd"><code>ros2 param dump /announcer</code></pre>
+<div class="lang py"><pre class="out">/announcer:
+  ros__parameters:
+    args:
+    - F
+    - W
+    name: stack
+    rate_hz: 4.0
+    start_type_description_service: true
+    use_sim_time: false</pre></div>
+<div class="lang cpp"><pre class="out">/announcer:
+  ros__parameters:
+    args:
+    - F
+    - W
+    name: stack
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    rate_hz: 4.0
+    start_type_description_service: true
+    use_sim_time: false</pre></div>
+<p>That is the format of a parameter file, used in step 6. Changes made this way last only as long as the node runs. Stop the announcer with <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 1.</p>
+</li>
+
+<li>
+<h3>Set them when the node starts</h3>
+<p>Everything after <code>--ros-args</code> is for ROS 2, not for the program. <code>-p name:=value</code> sets a parameter, and <code>-r __node:=planner_a</code> renames the node (the <code>-r</code> is "remap"). In terminal 1:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run a4_params announcer.py --ros-args -r __node:=planner_a -p name:=unstack -p "args:=[F, W]" -p rate_hz:=2.0</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a4_params announcer --ros-args -r __node:=planner_a -p name:=unstack -p "args:=[F, W]" -p rate_hz:=2.0</code></pre></div>
+<pre class="out">[INFO] [1793967297.364191092] [planner_a]: sent: unstack F W
+[INFO] [1793967297.858181327] [planner_a]: sent: unstack F W
+[INFO] [1793967298.358164681] [planner_a]: sent: unstack F W
+...</pre>
+<p>The node is called <code>planner_a</code> and runs at 2 Hz with our values. Long command lines are tedious, so put the values in a file. This is <code>code/04-parameters-launch/config/announcers.yaml</code>:</p>
+<pre class="src" data-file="code/04-parameters-launch/config/announcers.yaml"><code># Settings for the two announcers started by launch/announcers.launch.py.
+# The top-level key is the node name; parameters go under ros__parameters.
+planner_a:
+  ros__parameters:
+    name: unstack
+    args: [F, W]
+    rate_hz: 2.0
+planner_b:
+  ros__parameters:
+    name: putdown
+    args: [F]
+    rate_hz: 1.0</code></pre>
+<p>The top-level key is the <em>node name</em>, so one file can hold the settings of many nodes. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> and start a node called <code>planner_b</code> from the installed copy of this file (the build copies <code>config/</code> into <code>install/</code>):</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run a4_params announcer.py --ros-args -r __node:=planner_b --params-file install/a4_params/share/a4_params/config/announcers.yaml</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a4_params announcer --ros-args -r __node:=planner_b --params-file install/a4_params/share/a4_params/config/announcers.yaml</code></pre></div>
+<pre class="out">[INFO] [1793967301.863814731] [planner_b]: sent: putdown F
+[INFO] [1793967302.857799990] [planner_b]: sent: putdown F
+[INFO] [1793967303.857785854] [planner_b]: sent: putdown F
+...</pre>
+<p>It found its own entry (<code>planner_b</code>: <code>putdown F</code>, once a second) and ignored <code>planner_a</code>'s. Stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+</li>
+
+<li>
+<h3>Start everything with a launch file</h3>
+<p>Two announcers and a listener already means three terminals. This is <code>code/04-parameters-launch/launch/announcers.launch.py</code>:</p>
+<pre class="src" data-file="code/04-parameters-launch/launch/announcers.launch.py"><code>"""Starts two announcers (with settings from config/announcers.yaml) and one listener.
+
+    ros2 launch a4_params announcers.launch.py              Python programs
+    ros2 launch a4_params announcers.launch.py lang:=cpp    C++ programs
+"""
+import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    params_file = os.path.join(get_package_share_directory('a4_params'), 'config', 'announcers.yaml')
+    lang = LaunchConfiguration('lang')
+
+    def program(name):
+        # Python programs were installed as name.py, C++ programs as name.
+        return PythonExpression(["'", name, ".py' if '", lang, "' == 'py' else '", name, "'"])
+
+    return LaunchDescription([
+        DeclareLaunchArgument('lang', default_value='py', description="'py' or 'cpp': which programs to start"),
+        Node(package='a4_params', executable=program('announcer'), name='planner_a',
+             parameters=[params_file], output='screen'),
+        Node(package='a4_params', executable=program('announcer'), name='planner_b',
+             parameters=[params_file], output='screen'),
+        Node(package='a4_params', executable=program('listener'), output='screen'),
+    ])</code></pre>
+<ul>
+<li><code>generate_launch_description()</code> is the function <code>ros2 launch</code> calls. It returns the list of things to start.</li>
+<li>Each <code>Node(...)</code> starts one program: <code>package</code> and <code>executable</code> say which one, <code>name</code> is the node name (like <code>-r __node:=</code>), <code>parameters</code> takes the YAML file (or a Python dictionary), and <code>output='screen'</code> shows its log in this terminal.</li>
+<li>The file is found through <code>get_package_share_directory</code>, the folder of an installed package where the build copied <code>config/</code> and <code>launch/</code>, so it works from any folder.</li>
+<li><code>DeclareLaunchArgument('lang', ...)</code> gives the launch file an argument. <code>program()</code> uses it to choose between the Python programs (installed as <code>announcer.py</code>) and the C++ ones (<code>announcer</code>), so the same launch file serves both languages.</li>
+</ul>
+<p>Look at the arguments it offers, then start it:</p>
+<pre class="cmd"><code>ros2 launch a4_params announcers.launch.py --show-args</code></pre>
+<pre class="out">Arguments (pass arguments as '&lt;name&gt;:=&lt;value&gt;'):
+
+    'lang':
+        'py' or 'cpp': which programs to start
+        (default: 'py')</pre>
+<div class="lang py"><pre class="cmd"><code>ros2 launch a4_params announcers.launch.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 launch a4_params announcers.launch.py lang:=cpp</code></pre></div>
+<div class="lang py"><pre class="out">[INFO] [launch]: All log files can be found below /tmp/.ros/log/2026-11-06-12-15-17-069540-lab1-43
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [announcer.py-1]: process started with pid [47]
+[INFO] [announcer.py-2]: process started with pid [48]
+[INFO] [listener.py-3]: process started with pid [49]
+[listener.py-3] [INFO] [1793967317.734282809] [listener]: heard: unstack F W
+[announcer.py-1] [INFO] [1793967317.734340720] [planner_a]: sent: unstack F W
+[announcer.py-1] [INFO] [1793967318.227864834] [planner_a]: sent: unstack F W
+[listener.py-3] [INFO] [1793967318.227958702] [listener]: heard: unstack F W
+[listener.py-3] [INFO] [1793967318.229394937] [listener]: heard: putdown F
+[announcer.py-2] [INFO] [1793967318.235299148] [planner_b]: sent: putdown F
+...</pre></div>
+<div class="lang cpp"><pre class="out">[INFO] [launch]: All log files can be found below /tmp/.ros/log/2026-11-06-12-15-32-949667-lab1-43
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [announcer-1]: process started with pid [47]
+[INFO] [announcer-2]: process started with pid [48]
+[INFO] [listener-3]: process started with pid [49]
+[announcer-1] [INFO] [1793967333.481354839] [planner_a]: sent: unstack F W
+[listener-3] [INFO] [1793967333.481491028] [listener]: heard: unstack F W
+[announcer-1] [INFO] [1793967333.981356785] [planner_a]: sent: unstack F W
+[announcer-2] [INFO] [1793967333.981361313] [planner_b]: sent: putdown F
+[listener-3] [INFO] [1793967333.981504075] [listener]: heard: unstack F W
+[listener-3] [INFO] [1793967333.981544843] [listener]: heard: putdown F
+...</pre></div>
+<p>Three programs, one terminal. The prefix on each line (<code>[planner_a]</code>, <code>[listener]</code>) is the node that wrote it; <code>planner_a</code> prints two lines per second and <code>planner_b</code> one, as the YAML file says. From terminal 2, check from outside:</p>
+<pre class="cmd"><code>ros2 node list
+ros2 param get /planner_a name
+ros2 param get /planner_b name
+ros2 topic info /action</code></pre>
+<pre class="out">/listener
+/planner_a
+/planner_b
+String value is: unstack
+String value is: putdown
+Type: std_msgs/msg/String
+Publisher count: 2
+Subscription count: 1</pre>
+<p>Two publishers feed one topic, and one listener hears both. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in terminal 1: all three programs stop together.</p>
+</li>
+
+<li>
+<h3>Read the arguments of a real launch file</h3>
+<p>The launch file that starts the Kinova arm in simulation is built from the same pieces. Ask it for its arguments (this starts nothing):</p>
+<pre class="cmd"><code>ros2 launch kortex_bringup kortex_sim_control.launch.py --show-args</code></pre>
+<pre class="out">Arguments (pass arguments as '&lt;name&gt;:=&lt;value&gt;'):
+
+    'sim_gazebo':
+        Use Gazebo for simulation
+        (default: 'true')
+
+    'robot_type':
+        Type/series of robot. Valid choices are: ['gen3', 'gen3_lite']
+        (default: 'gen3')
+
+    'dof':
+        DoF of robot. Valid choices are: ['6', '7']
+        (default: '7')
+
+    'vision':
+        Use arm mounted realsense. Valid choices are: ['true', 'false']
+        (default: 'false')
+...</pre>
+<p>This is the first part of a longer list (output shortened here). It includes <code>gripper</code> (which gripper to use, default none) and <code>launch_rviz</code>. They are launch arguments exactly like our <code>lang</code>: <code>dof:=7</code> selects the 7-DoF arm and <code>gripper:=robotiq_2f_85</code> adds the gripper. From Part B on you will pass these, and the real arm uses the same launch files with other arguments.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li><code>ros2 param set /announcer rate_hz 4.0</code> makes the running announcer print four lines per second, and <code>rate_hz -1.0</code> is refused with <code>rate_hz must be positive</code>,</li>
+<li>starting with <code>--params-file</code> makes <code>planner_b</code> announce <code>putdown F</code>,</li>
+<li><code>ros2 launch a4_params announcers.launch.py</code> (with <code>lang:=cpp</code> for C++) shows the listener hearing both <code>unstack F W</code> and <code>putdown F</code>.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all three are true.</div>
+
+<h2>5. Exercise</h2>
+<p>Make <code>planner_b</code> announce <code>pickup E</code> once every two seconds <strong>without changing any Python or C++ code and without changing the launch file</strong>. Which file do you edit, and what must you do before the launch shows the change?</p>
+<details>
+<summary>Answer</summary>
+<p>Edit <code>config/announcers.yaml</code>:</p>
+<pre class="src" data-file="code/04-parameters-launch/config/announcers.yaml"><code>planner_b:
+  ros__parameters:
+    name: pickup
+    args: [E]
+    rate_hz: 0.5</code></pre>
+<p>A rate of 0.5 per second is one message every two seconds. Then run <code>colcon build</code> again: the launch file reads the copy in <code>install/</code>, and the build is what copies your edited file there. After <code>source install/setup.bash</code> (not needed again in a shell that was already sourced) the launch prints <code>heard: pickup E</code> every two seconds next to the two <code>unstack F W</code> lines per second. We ran exactly this.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A <strong>parameter</strong> is a named, typed setting of one node. It is <strong>declared</strong> with a default (which also fixes its type), read with <code>get_parameter</code>, and can be checked or refused by an <strong>on-set callback</strong>.</li>
+<li>Outside the node: <code>ros2 param list / get / describe / set / dump</code>. Parameters are services underneath. Set values stay only while the node runs.</li>
+<li>At start: <code>--ros-args -p name:=value</code>, <code>--params-file file.yaml</code> (top-level key = node name), and <code>-r __node:=newname</code> to rename the node.</li>
+<li>A <strong>launch file</strong> is a Python function that returns the nodes to start, with names, parameters and <strong>launch arguments</strong>. <code>ros2 launch pkg file.launch.py arg:=value</code> starts them all, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops them all. <code>--show-args</code> lists the arguments.</li>
+<li><code>ros2 run</code> and <code>ros2 launch</code> use <em>installed</em> files: after editing a launch or YAML file, build again.</li>
+</ul>
+
+<nav class="pager">
+<a href="a3-actions.html"><small>Previous</small>A3 · Actions</a>
+<span class="soon next"><small>Next</small>A5 · Packages and workspaces (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
