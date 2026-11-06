@@ -14,7 +14,7 @@ public:
   Talker() : Node("talker")
   {
     pub_ = create_publisher<std_msgs::msg::String>("chatter", 10);
-    timer_ = create_wall_timer(100ms, [this]() { tick(); });   // call tick every 0.5 s
+    timer_ = create_wall_timer(500ms, [this]() { tick(); });   // call tick every 0.5 s
   }
 
 private:
