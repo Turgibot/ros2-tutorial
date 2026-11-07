@@ -40,7 +40,7 @@ Rules: one new idea at a time; nothing used before it is taught; every number/fo
 - A3 Actions: long-running goals with feedback and cancel (what a pick-and-place will be).
 - A4 Parameters and launch files.
 - A5 Packages and workspaces: `package.xml`, `CMakeLists.txt`/`setup.py`, `colcon build`, overlays, sourcing order.
-- A6 Frames and TF2: what a coordinate frame is, `base_link`, tool frame, viewing in RViz.
+- A6 Frames and TF2: what a coordinate frame is, transforms and the frame tree, `/tf` and `/tf_static`, broadcaster and listener nodes (Python and C++), `tf2_echo`, `view_frames`, the RViz TF display, and the arm's frames (`base_link` to `end_effector_link`) from `robot_state_publisher`. Written and run (A6).
 - A7 ros2_control in one lesson: controllers, joint states, command interfaces (concept only).
 
 **Part B, the Kinova Gen3, milestone 1**

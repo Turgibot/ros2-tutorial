@@ -3,3 +3,5 @@ install/
 log/
 __pycache__/
 code/05-packages/my_ws*/
+frames_*.pdf
+frames_*.gv

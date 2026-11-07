@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A6 · Frames and TF2</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A6 · Frames and TF2</h1>
+<p class="lead">Learn how a robot system says <em>where</em> things are: coordinate frames, the transforms between them, and how to publish, read and look at them. Then see the same machinery at work in the Kinova arm.</p>
+
+<h2>1. Goal</h2>
+<p>Every question a robot asks is about position. Where is the gripper? Where is the cup? Where is the cup <em>relative to the gripper</em>? Each answer needs a point of view, and ROS 2 keeps all of them in one system called <strong>TF2</strong>. From this lesson on you will meet it everywhere: in RViz, in the arm's description, in MoveIt and in Gazebo.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>seen what a <strong>frame</strong> and a <strong>transform</strong> are, and why frames form a tree,</li>
+<li>published a static frame from the command line, and a moving frame from a node you read,</li>
+<li>asked TF for the position of one frame as seen from another, with the command line and with a node,</li>
+<li>looked at the tree with <code>view_frames</code> and at the frames in RViz,</li>
+<li>seen the frames of the Kinova arm, and where they come from.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>Frame</h3>
+<p>A <strong>frame</strong> (or coordinate frame) is a point of view: an origin and three axes, <em>x</em>, <em>y</em>, <em>z</em>, fixed to something. The base of the arm has a frame, so has each link, the gripper, a camera, the table. A position such as "x = 0.3, y = 0.1, z = 0.2" means nothing until you say <em>in which frame</em>. ROS 2 uses these rules (REP 103), and so does RViz:</p>
+<ul>
+<li>distances are in <strong>metres</strong> and angles in <strong>radians</strong>,</li>
+<li>the frame is right-handed: <em>x</em> points forward, <em>y</em> left, <em>z</em> up,</li>
+<li>RViz draws the axes as <strong>red = x, green = y, blue = z</strong> (the order of R, G, B).</li>
+</ul>
+
+<h3>Transform</h3>
+<p>A <strong>transform</strong> says where one frame is, as seen from another. It has two parts:</p>
+<ul>
+<li>a <strong>translation</strong>: three numbers <em>(x, y, z)</em>, the position of the child's origin in the parent, in metres,</li>
+<li>a <strong>rotation</strong>: how the child's axes are turned relative to the parent's, written as a <strong>quaternion</strong>, four numbers <em>(x, y, z, w)</em>. You do not need quaternion theory yet (B2 has it). Two cases are enough for now: <em>no rotation</em> is <em>(0, 0, 0, 1)</em>, and a turn about the <em>z</em> axis by an angle <em>θ</em> is <em>(0, 0, sin(θ/2), cos(θ/2))</em>. For example θ = 90° = π/2 gives <em>(0, 0, 0.707, 0.707)</em>.</li>
+</ul>
+<p>The message type is <code>geometry_msgs/TransformStamped</code>: a transform, plus a <strong>header</strong> with a time stamp and the name of the <strong>parent</strong> frame (<code>header.frame_id</code>), plus the name of the <strong>child</strong> frame (<code>child_frame_id</code>). Read it as: <em>"at this time, the child is at this pose in the parent"</em>.</p>
+
+<h3>The tree</h3>
+<p>Each frame has exactly <strong>one parent</strong> (except the root, which has none), so all frames of a robot form a <strong>tree</strong>. A tree is enough to answer any question. To find frame C in frame A, TF walks the tree from A to C and combines the transforms along the way. In this lesson:</p>
+<pre class="out">base  ──►  marker  ──►  tip
+      moving        fixed (0.1 m ahead of marker)</pre>
+<p>If <code>marker</code> is at <em>(0.3, 0, 0.2)</em> in <code>base</code> and <code>tip</code> is 0.1 m ahead of <code>marker</code>, with no rotation anywhere, then <code>tip</code> is at <em>(0.4, 0, 0.2)</em> in <code>base</code>: the translations add up. When <code>marker</code> is <em>turned</em>, "0.1 m ahead" points in another direction, and the sum has to turn the 0.1 with it. You will check that with numbers in step 2. TF does this arithmetic for you, in both directions: asking for <code>base</code> as seen from <code>tip</code> is just as easy.</p>
+
+<h3>Two topics: <code>/tf</code> and <code>/tf_static</code></h3>
+<p>Frames are shared over two topics of type <code>tf2_msgs/TFMessage</code> (a list of <code>TransformStamped</code>):</p>
+<table>
+<tr><th>Topic</th><th>For</th><th>Sent</th></tr>
+<tr><td><code>/tf</code></td><td>frames that <strong>move</strong>, such as the links of an arm</td><td>over and over, many times a second</td></tr>
+<tr><td><code>/tf_static</code></td><td>frames that <strong>never move</strong> relative to their parent, such as a camera bolted to the base</td><td>once. It uses the "transient local" QoS from A1, so a program that starts later still receives it</td></tr>
+</table>
+<p>A <strong>broadcaster</strong> publishes on these topics. A <strong>listener</strong> subscribes to both and stores what it hears in a <strong>buffer</strong>, a few seconds of history. A <em>lookup</em> asks the buffer: "where is <code>tip</code> in <code>base</code>, at this time?". You will use both in the nodes below. A frame exists only while someone publishes it.</p>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5), in the <code>ros2-tutorial</code> folder. You need <strong>four</strong> of them in this lesson, each one in its own terminal window: call them T1 to T4. Choose your language with the <strong>Python / C++</strong> switch at the top right: it changes the programs you build and run, not the tools of ROS 2 itself.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Publish a static frame from the command line</h3>
+<p>The first frame is a fixed one, so there is nothing to write: <code>tf2_ros</code> has a ready-made program for it.</p>
+<p class="env docker"><span class="where host">host</span> <strong>T1</strong>: open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> <strong>T1</strong>: open a terminal in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span> Publish a frame called <code>tip</code>, 0.1 m ahead (along <em>x</em>) of a frame called <code>marker</code>:</p>
+<pre class="cmd"><code>ros2 run tf2_ros static_transform_publisher --x 0.1 --frame-id marker --child-frame-id tip</code></pre>
+<pre class="out">[INFO] [1794055385.197557703] [static_transform_publisher_Umbk3XNYKEWXMCkM]: Spinning until stopped - publishing transform
+translation: ('0.100000', '0.000000', '0.000000')
+rotation: ('0.000000', '0.000000', '0.000000', '1.000000')
+from 'marker' to 'tip'</pre>
+<p>The options not given (<code>--y</code>, <code>--z</code>, <code>--roll</code>, <code>--pitch</code>, <code>--yaw</code>) are zero, and the rotation printed is the "no rotation" quaternion <em>(0, 0, 0, 1)</em>. Leave it running.</p>
+<p class="env docker"><span class="where host">host</span> <strong>T2</strong>: open a second terminal and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> <strong>T2</strong>: open a second terminal in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span> Ask TF where <code>tip</code> is, as seen from <code>marker</code>. <code>tf2_echo</code> takes the <em>source</em> frame (the point of view) and then the frame you want to locate:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo marker tip</code></pre>
+<pre class="out">[INFO] [1794055400.641787852] [tf2_echo]: Waiting for transform marker ->  tip: Invalid frame ID "marker" passed to canTransform argument target_frame - frame does not exist
+At time 0.0
+- Translation: [0.100, 0.000, 0.000]
+- Rotation: in Quaternion (xyzw) [0.000, 0.000, 0.000, 1.000]
+- Rotation: in RPY (radian) [0.000, -0.000, 0.000]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.000]
+- Matrix:
+  1.000  0.000  0.000  0.100
+  0.000  1.000  0.000  0.000
+  0.000  0.000  1.000  0.000
+  0.000  0.000  0.000  1.000</pre>
+<p>The first line is normal: the listener has just started and has not yet received anything. Then the same numbers come back, in three forms: the quaternion, the same rotation as roll-pitch-yaw angles (easier to read: radians and degrees), and as a 4×4 matrix. The time is 0.0, which is how TF marks a transform that never changes. It repeats every second: stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+<p>Now ask for something that does not exist yet. <code>base</code> is not published by anyone, so there is no path from it to <code>tip</code>:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base tip</code></pre>
+<pre class="out">[INFO] [1794055402.734719476] [tf2_echo]: Waiting for transform base ->  tip: Invalid frame ID "base" passed to canTransform argument target_frame - frame does not exist
+[INFO] [1794055403.734719476] [tf2_echo]: Waiting for transform base ->  tip: Invalid frame ID "base" passed to canTransform argument target_frame - frame does not exist</pre>
+<p>It waits and keeps complaining, until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. This is what a broken tree looks like. Read the message: it names the first frame that is missing. Here it is <code>base</code>. If it names <code>tip</code> instead, T1 is not running (or runs with another <code>ROS_DOMAIN_ID</code>): check T1. Stop programs with <kbd>Ctrl</kbd>+<kbd>C</kbd>, not <kbd>Ctrl</kbd>+<kbd>Z</kbd>, which only suspends a program. Also look at the message that carries the static frame:</p>
+<pre class="cmd"><code>ros2 topic echo /tf_static --once</code></pre>
+<pre class="out">transforms:
+- header:
+    stamp:
+      sec: 1794055385
+      nanosec: 195882567
+    frame_id: marker
+  child_frame_id: tip
+  transform:
+    translation:
+      x: 0.1
+      y: 0.0
+      z: 0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+---</pre>
+<p>That is a <code>TransformStamped</code> inside a list: parent <code>marker</code> in <code>frame_id</code>, child <code>tip</code> in <code>child_frame_id</code>, a translation and a quaternion. This message was sent once, when T1 started, and you received it now because <code>/tf_static</code> keeps its last message for late joiners.</p>
+</li>
+
+<li>
+<h3>Broadcast a moving frame</h3>
+<p>Now the moving part of the tree: a frame <code>marker</code> that circles around <code>base</code> at 0.3 m from it and 0.2 m above it, at 0.5 rad/s (about one turn in 12.6 s). This is the program, <code>orbit</code>. It builds a <code>TransformStamped</code> every 50 ms and sends it with a <strong>TransformBroadcaster</strong>.</p>
+<div class="lang py">
+<pre class="src" data-file="code/06-frames/py/orbit.py"><code>#!/usr/bin/env python3
+"""Publishes a moving frame 'marker' that circles around the frame 'base' (radius 0.3 m, 0.5 rad/s, 0.2 m up)."""
+import math
+
+import rclpy
+from geometry_msgs.msg import TransformStamped
+from rclpy.node import Node
+from tf2_ros import TransformBroadcaster
+
+
+class Orbit(Node):
+    def __init__(self):
+        super().__init__('orbit')
+        self.broadcaster = TransformBroadcaster(self)
+        self.start = self.get_clock().now()
+        self.create_timer(0.05, self.on_timer)  # 20 times per second
+
+    def on_timer(self):
+        now = self.get_clock().now()
+        angle = 0.5 * (now - self.start).nanoseconds * 1e-9  # 0.5 rad/s
+
+        t = TransformStamped()
+        t.header.stamp = now.to_msg()
+        t.header.frame_id = 'base'     # parent frame
+        t.child_frame_id = 'marker'    # child frame: its pose is given in the parent
+        t.transform.translation.x = 0.3 * math.cos(angle)
+        t.transform.translation.y = 0.3 * math.sin(angle)
+        t.transform.translation.z = 0.2
+        # rotation about z by `angle`, as a quaternion (x, y, z, w) = (0, 0, sin(angle/2), cos(angle/2))
+        t.transform.rotation.z = math.sin(angle / 2)
+        t.transform.rotation.w = math.cos(angle / 2)
+        self.broadcaster.sendTransform(t)
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Orbit())
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/06-frames/cpp/orbit.cpp"><code>// Publishes a moving frame "marker" that circles around the frame "base" (radius 0.3 m, 0.5 rad/s, 0.2 m up).
+#include &lt;chrono&gt;
+#include &lt;cmath&gt;
+#include &lt;memory&gt;
+
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/transform_broadcaster.h"
+
+using namespace std::chrono_literals;
+
+class Orbit : public rclcpp::Node
+{
+public:
+  Orbit() : Node("orbit")
+  {
+    broadcaster_ = std::make_unique&lt;tf2_ros::TransformBroadcaster&gt;(*this);
+    start_ = now();
+    timer_ = create_wall_timer(50ms, [this]() { on_timer(); });  // 20 times per second
+  }
+
+private:
+  void on_timer()
+  {
+    const auto stamp = now();
+    const double angle = 0.5 * (stamp - start_).seconds();  // 0.5 rad/s
+
+    geometry_msgs::msg::TransformStamped t;
+    t.header.stamp = stamp;
+    t.header.frame_id = "base";     // parent frame
+    t.child_frame_id = "marker";    // child frame: its pose is given in the parent
+    t.transform.translation.x = 0.3 * std::cos(angle);
+    t.transform.translation.y = 0.3 * std::sin(angle);
+    t.transform.translation.z = 0.2;
+    // rotation about z by `angle`, as a quaternion (x, y, z, w) = (0, 0, sin(angle/2), cos(angle/2))
+    t.transform.rotation.z = std::sin(angle / 2);
+    t.transform.rotation.w = std::cos(angle / 2);
+    broadcaster_-&gt;sendTransform(t);
+  }
+
+  std::unique_ptr&lt;tf2_ros::TransformBroadcaster&gt; broadcaster_;
+  rclcpp::Time start_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Orbit&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+</div>
+<p>Read it with the concepts in mind:</p>
+<ul>
+<li><code>header.frame_id = 'base'</code> is the parent and <code>child_frame_id = 'marker'</code> the child: the message says where <code>marker</code> is, in <code>base</code>.</li>
+<li>The position is a circle: <em>x = 0.3 cos(a)</em>, <em>y = 0.3 sin(a)</em>, with the angle <em>a = 0.5 · t</em> growing with the time <em>t</em> since the start, and a fixed height <em>z = 0.2</em>.</li>
+<li>The orientation turns with the position: a rotation about <em>z</em> by <em>a</em> is the quaternion <em>(0, 0, sin(a/2), cos(a/2))</em>, as in the concepts. So the <em>x</em> axis of <code>marker</code> always points away from <code>base</code>.</li>
+<li>The time stamp is the current time. Listeners use it to say "where was it then".</li>
+</ul>
+<p>The package is <code>code/06-frames</code>: <code>package.xml</code> and <code>CMakeLists.txt</code> as in A4 (they now also need <code>tf2_ros</code> and <code>geometry_msgs</code>). Build it and run <code>orbit</code>:</p>
+<p class="env docker"><span class="where host">host</span> <strong>T3</strong>: open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> <strong>T3</strong>: open a terminal in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>cd code/06-frames
+colcon build
+source install/setup.bash</code></pre>
+<div class="lang py"><pre class="cmd"><code>ros2 run a6_frames orbit.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a6_frames orbit</code></pre></div>
+<p>The program prints nothing. It publishes. In <strong>T2</strong>, look at the topic:</p>
+<pre class="cmd"><code>ros2 topic echo /tf --once
+ros2 topic hz /tf</code></pre>
+<pre class="out">transforms:
+- header:
+    stamp:
+      sec: 1794055390
+      nanosec: 725629042
+    frame_id: base
+  child_frame_id: marker
+  transform:
+    translation:
+      x: -0.031238105869757317
+      y: 0.298369202066282
+      z: 0.2
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.7430097642581347
+      w: 0.6692805766022731
+---
+average rate: 19.997
+	min: 0.050s max: 0.050s std dev: 0.00025s window: 22</pre>
+<p>20 messages a second, one every 50 ms, as in the timer. (Stop <code>hz</code> with <kbd>Ctrl</kbd>+<kbd>C</kbd>.) The numbers fit the formulas: the position is on the circle, <em>(−0.031)² + 0.298² = 0.09 = 0.3²</em>, and the rotation is <em>sin(a/2) = 0.743</em>, <em>cos(a/2) = 0.669</em>, so <em>a/2 = 0.84</em> and the angle is <em>a = 1.68 rad</em>, which is 96°: <code>marker</code> is a little past the <em>y</em> axis. Your numbers will differ: they depend on when you ask.</p>
+<p>The tree is now complete, <code>base → marker → tip</code>, so the question that failed before has an answer. Ask again, from T2:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base tip</code></pre>
+<pre class="out">At time 1794055011.281557794
+- Translation: [-0.388, 0.096, 0.200]
+- Rotation: in Quaternion (xyzw) [0.000, 0.000, 0.993, 0.120]
+- Rotation: in RPY (radian) [0.000, -0.000, 2.900]
+- Rotation: in RPY (degree) [0.000, -0.000, 166.165]
+- Matrix:
+ -0.971 -0.239  0.000 -0.388
+  0.239 -0.971  0.000  0.096
+  0.000  0.000  1.000  0.200
+  0.000  0.000  0.000  1.000
+At time 1794055012.281828136
+- Translation: [-0.387, -0.102, 0.200]
+...</pre>
+<p>The result is the position of <code>tip</code> in <code>base</code>, and it moves, because <code>marker</code> does. (Stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>. The first line you may see, "Waiting for transform", is the same start-up message as before.) TF has combined two transforms to give this answer, and you can check the arithmetic in step 5.</p>
+</li>
+
+<li>
+<h3>Look at the tree: <code>view_frames</code></h3>
+<p>A tree is easier to understand when you see it. <code>view_frames</code> listens to TF for five seconds and draws the tree. Run it in <strong>T2</strong>, which is in the <code>ros2-tutorial</code> folder, so the files appear there:</p>
+<pre class="cmd"><code>ros2 run tf2_tools view_frames</code></pre>
+<pre class="out">[INFO] [1794055395.336320897] [view_frames]: Listening to tf data for 5.0 seconds...
+[INFO] [1794055400.376803759] [view_frames]: Generating graph...
+[INFO] [1794055400.378616678] [view_frames]: Exporting graph in frames_2026-11-07_12.43.20.pdf file...</pre>
+<p>It wrote <code>frames_<em>date</em>.pdf</code> (and a <code>.gv</code> text version) in the folder. Open the PDF on your computer. This is what it contains for our tree:</p>
+<figure>
+<img src="img/a6-frames-orbit.png" alt="A graph with three ovals joined by arrows: base, then marker, then tip. The arrow from base to marker is labelled with an average rate of 20.199 and a buffer length of 5.0. The arrow from marker to tip has a rate of 10000.0 and buffer length 0.0." width="420">
+<figcaption>The frame tree. Every arrow is one transform, from the parent to the child. 20 Hz on the first arrow is <code>orbit</code>; the static one shows a rate of 10000 and no history, which is how TF marks a transform that never changes.</figcaption>
+</figure>
+<p>When something is wrong with your frames (a frame missing, two trees that are not connected, a frame with two parents), this picture is the first place to look. <code>ros2 run tf2_ros tf2_monitor</code> is a text alternative that prints, per frame, how long the transforms take to arrive.</p>
+</li>
+
+<li>
+<h3>See the frames in RViz</h3>
+<p>Now see them. RViz has a <strong>TF</strong> display that draws every frame as a set of axes, with its name and a thin line to its parent. Start RViz with a configuration file from this lesson that has the Grid and TF displays set up (in <strong>T4</strong>: open one more terminal as before, in the <code>ros2-tutorial</code> folder):</p>
+<p class="env docker"><span class="where host">host</span></p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>ros2 run rviz2 rviz2 -d code/06-frames/rviz/orbit_demo.rviz</code></pre>
+<p>A window opens (it takes a few seconds), like the one below: three sets of axes, with the labels <code>base</code>, <code>marker</code> and <code>tip</code>. <code>marker</code> circles around <code>base</code> and <code>tip</code> follows it, always 0.1 m ahead of <code>marker</code> in its <em>x</em> (red) direction.</p>
+<figure>
+<img src="img/a6-orbit-rviz.png" alt="The RViz window with a Displays panel on the left showing Grid and TF, and a 3D view on the right with a grid. Three sets of coloured axes are labelled base, marker and tip. Thin lines link base to marker and marker to tip." width="628">
+<figcaption>RViz showing the three frames. Red is x, green is y, blue is z. <code>marker</code> is the middle one, 0.2 m above the grid; <code>tip</code> is a little further out along its red axis.</figcaption>
+</figure>
+<p>Two settings in the left panel matter, and you will use them all the time:</p>
+<ul>
+<li><strong>Global Options &rarr; Fixed Frame</strong> is the frame RViz treats as standing still, and everything is drawn relative to it. It is set to <code>base</code> here. If you set it to <code>marker</code>, RViz moves <code>base</code> and <code>tip</code> around a stationary <code>marker</code> instead: same tree, another point of view. If it names a frame that does not exist, the display turns red with "Frame [...] does not exist" (the same error as in step 1).</li>
+<li><strong>TF</strong> has <em>Show Names</em>, <em>Show Axes</em>, <em>Show Arrows</em> and <em>Marker Scale</em> (the size of the axes). Open the <em>Frames</em> list at the bottom of the TF entry to switch single frames on and off.</li>
+</ul>
+<p>Close RViz with its window button. Leave T1 (the static frame) and T3 (<code>orbit</code>) running: the next step needs them.</p>
+</li>
+
+<li>
+<h3>Look up a transform in code</h3>
+<p>The command-line tools answer your questions; your own nodes need the answer too, for instance "where is the cup in the gripper's frame, so I can close the fingers?". This is the job of a <strong>TransformListener</strong> and its <strong>Buffer</strong>. The program <code>where</code> asks once a second, and which frames it asks about are parameters (A4): <code>source</code> (default <code>base</code>) and <code>target</code> (default <code>marker</code>).</p>
+<div class="lang py">
+<pre class="src" data-file="code/06-frames/py/where.py"><code>#!/usr/bin/env python3
+"""Once a second, asks TF where the frame `target` is, as seen from the frame `source`, and prints it."""
+import rclpy
+from rclpy.node import Node
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformException, TransformListener
+
+
+class Where(Node):
+    def __init__(self):
+        super().__init__('where')
+        self.declare_parameter('source', 'base')
+        self.declare_parameter('target', 'marker')
+        self.buffer = Buffer()
+        self.listener = TransformListener(self.buffer, self)  # fills the buffer from /tf and /tf_static
+        self.create_timer(1.0, self.on_timer)
+
+    def on_timer(self):
+        source = self.get_parameter('source').value
+        target = self.get_parameter('target').value
+        try:
+            # Time() means "the latest transform available"
+            t = self.buffer.lookup_transform(source, target, Time())
+        except TransformException as e:
+            self.get_logger().warn(f'cannot get {target} in {source}: {e}')
+            return
+        p = t.transform.translation
+        self.get_logger().info(f'{target} in {source}: x={p.x:.3f} y={p.y:.3f} z={p.z:.3f}')
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Where())
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/06-frames/cpp/where.cpp"><code>// Once a second, asks TF where the frame `target` is, as seen from the frame `source`, and prints it.
+#include &lt;chrono&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+
+#include "rclcpp/rclcpp.hpp"
+#include "tf2/exceptions.h"
+#include "tf2/time.h"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
+
+using namespace std::chrono_literals;
+
+class Where : public rclcpp::Node
+{
+public:
+  Where() : Node("where")
+  {
+    declare_parameter("source", "base");
+    declare_parameter("target", "marker");
+    buffer_ = std::make_unique&lt;tf2_ros::Buffer&gt;(get_clock());
+    listener_ = std::make_unique&lt;tf2_ros::TransformListener&gt;(*buffer_);  // fills the buffer from /tf and /tf_static
+    timer_ = create_wall_timer(1s, [this]() { on_timer(); });
+  }
+
+private:
+  void on_timer()
+  {
+    const std::string source = get_parameter("source").as_string();
+    const std::string target = get_parameter("target").as_string();
+    try {
+      // tf2::TimePointZero means "the latest transform available"
+      const auto t = buffer_-&gt;lookupTransform(source, target, tf2::TimePointZero);
+      const auto &amp; p = t.transform.translation;
+      RCLCPP_INFO(
+        get_logger(), "%s in %s: x=%.3f y=%.3f z=%.3f", target.c_str(), source.c_str(),
+        p.x, p.y, p.z);
+    } catch (const tf2::TransformException &amp; e) {
+      RCLCPP_WARN(
+        get_logger(), "cannot get %s in %s: %s", target.c_str(), source.c_str(), e.what());
+    }
+  }
+
+  std::unique_ptr&lt;tf2_ros::Buffer&gt; buffer_;
+  std::unique_ptr&lt;tf2_ros::TransformListener&gt; listener_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Where&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre>
+</div>
+<p>The listener fills the buffer in the background, from <code>/tf</code> and <code>/tf_static</code>. <code>lookup_transform(source, target, time)</code> asks "where is <code>target</code>, as seen from <code>source</code>" (the same order as <code>tf2_echo</code>) and returns a <code>TransformStamped</code>. The time <code>Time()</code> (<code>tf2::TimePointZero</code> in C++) means "the latest one available". You may also ask for a time in the past, as long as the buffer still has it (10 s by default). A lookup can <strong>fail</strong>: the frame may not exist yet, or the two frames may not be connected. It then raises an exception (<code>TransformException</code>), and a robust node catches it, as this one does, and tries again.</p>
+<p>The program is already built, since it is in the same package as <code>orbit</code>. Run it in <strong>T4</strong> (<code>source install/setup.bash</code> in <code>code/06-frames</code> first, as in step 2) with <code>orbit</code> and the static frame still running:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run a6_frames where.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a6_frames where</code></pre></div>
+<div class="lang py"><pre class="out">[INFO] [1794055006.490649143] [where]: marker in base: x=0.267 y=0.137 z=0.200
+[INFO] [1794055007.482069651] [where]: marker in base: x=0.168 y=0.248 z=0.200
+[INFO] [1794055008.482009705] [where]: marker in base: x=0.029 y=0.299 z=0.200
+[INFO] [1794055009.482012157] [where]: marker in base: x=-0.118 y=0.276 z=0.200</pre></div>
+<div class="lang cpp"><pre class="out">[INFO] [1794055015.391332438] [where]: marker in base: x=0.071 y=-0.292 z=0.200
+[INFO] [1794055016.391330367] [where]: marker in base: x=0.202 y=-0.222 z=0.200
+[INFO] [1794055017.391301847] [where]: marker in base: x=0.284 y=-0.098 z=0.200
+[INFO] [1794055018.391401782] [where]: marker in base: x=0.296 y=0.050 z=0.200</pre></div>
+<p>Each second the point is a little further around the circle (0.5 rad is about 29°, in the right direction). Stop it, then ask about the other frame by setting the <code>target</code> parameter, as in A4:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run a6_frames where.py --ros-args -p target:=tip</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a6_frames where --ros-args -p target:=tip</code></pre></div>
+<pre class="out">[INFO] [1794055006.491082377] [where]: tip in base: x=0.356 y=0.183 z=0.200
+[INFO] [1794055007.482070953] [where]: tip in base: x=0.224 y=0.331 z=0.200
+[INFO] [1794055008.481984036] [where]: tip in base: x=0.038 y=0.398 z=0.200</pre>
+<p>That is the chain at work: <code>tip</code> is two transforms away from <code>base</code>, and one lookup gives the answer. Check it by hand with two lines recorded at the same instant (when we ran both programs side by side, your numbers will differ): <code>marker</code> was at <em>x = 0.267, y = 0.137</em> and <code>tip</code> at <em>x = 0.356, y = 0.183</em>. The angle of <code>marker</code> is <em>a = atan2(0.137, 0.267) = 0.474 rad</em>. <code>tip</code> is 0.1 m along the <em>x</em> axis of <code>marker</code>, which points in the direction <em>a</em>, so</p>
+<pre class="out">tip x = 0.267 + 0.1 · cos(0.474) = 0.267 + 0.089 = 0.356
+tip y = 0.137 + 0.1 · sin(0.474) = 0.137 + 0.046 = 0.183</pre>
+<p>It matches: TF turned the 0.1 m offset with the rotation of <code>marker</code> and added it to the position of <code>marker</code>. No node of yours does this arithmetic. Finally ask for a frame nobody publishes:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run a6_frames where.py --ros-args -p target:=nothing</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a6_frames where --ros-args -p target:=nothing</code></pre></div>
+<pre class="out">[WARN] [1794055006.490694118] [where]: cannot get nothing in base: "nothing" passed to lookupTransform argument source_frame does not exist. </pre>
+<p>A warning, once a second, and no crash: the exception was caught. (The wording says <em>source_frame</em> for the frame you asked for: that is how the TF2 library names its arguments, the opposite of <code>tf2_echo</code>. Do not let it confuse you.) Stop the program with <kbd>Ctrl</kbd>+<kbd>C</kbd>, and stop <code>orbit</code> and the static publisher in T3 and T1 too.</p>
+</li>
+
+<li>
+<h3>The frames of the Kinova arm</h3>
+<p>The arm is a tree of frames too, one per link, and it is published for you. Start the description of the arm, which you have used before, in <strong>T1</strong> (with the gripper, as in the plan of the course):</p>
+<pre class="cmd"><code>ros2 launch kortex_description view_robot.launch.py gripper:=robotiq_2f_85</code></pre>
+<p>Two windows open: RViz with the arm, and a small window of <em>joint sliders</em> (<code>joint_state_publisher_gui</code>). In a second terminal (T2) look at what is running and at the topics:</p>
+<pre class="cmd"><code>ros2 node list
+ros2 topic info /joint_states
+ros2 topic info /tf</code></pre>
+<pre class="out">/joint_state_publisher_gui
+/robot_state_publisher
+/rviz2
+/transform_listener_impl_647c937b3f50
+Type: sensor_msgs/msg/JointState
+Publisher count: 1
+Subscription count: 1
+Type: tf2_msgs/msg/TFMessage
+Publisher count: 1
+Subscription count: 1</pre>
+<p>Four things are going on, and they are the same in every robot you will meet:</p>
+<ol>
+<li><code>joint_state_publisher_gui</code> publishes <code>/joint_states</code> (type <code>sensor_msgs/JointState</code>): the <strong>angle of every joint</strong>, a list of names and numbers. The sliders set them. On the real arm, the driver publishes the same topic with the measured angles; with <code>ros2_control</code> (A7) it is the same again.</li>
+<li><code>robot_state_publisher</code> holds the arm's description (the URDF, a file that lists every link and joint and which link each is attached to; B1 reads it) and subscribes to <code>/joint_states</code>. Every joint of the description becomes one edge of the tree: a transform from the parent link to the child link, <em>rotated by the joint angle</em>. It publishes them on <code>/tf</code>.</li>
+<li>Joints that cannot move (the base mount, the gripper's fixed parts) never change, so they go out once on <code>/tf_static</code>.</li>
+<li>RViz is only a listener: its RobotModel and TF displays read <code>/tf</code>, exactly like your <code>where</code> node does.</li>
+</ol>
+<p>The RViz window of this launch shows the robot model only. To see the frames too, click <strong>Add</strong> in the Displays panel, choose <strong>TF</strong> in the list and press OK. Then enlarge the arrows with <em>Marker Scale</em> if they are too small. This is the arm with the TF display on (we used the configuration file <code>code/06-frames/rviz/arm_frames.rviz</code>, which has the model, semi-transparent, and the TF display already set up):</p>
+<figure>
+<img src="img/a6-arm-frames.png" alt="RViz with the Kinova arm standing straight up, drawn semi-transparent, with small coloured axes and labels at each joint, and the Displays panel with Grid, RobotModel and TF." width="628">
+<figcaption>The arm with every joint at zero. Each link has its own frame; all of them together are the tree that <code>robot_state_publisher</code> publishes.</figcaption>
+</figure>
+<p>So the arm in RViz is nothing more than TF drawn with shapes. Ask TF about the hand. The last link has the frame <code>end_effector_link</code>, and the root, the arm's mounting point, is <code>base_link</code> (it hangs from a frame called <code>world</code>). In T2:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">At time 1794055450.878703121
+- Translation: [-0.000, -0.025, 1.187]
+- Rotation: in Quaternion (xyzw) [0.000, -0.000, 0.000, 1.000]
+- Rotation: in RPY (radian) [0.000, -0.000, 0.000]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.000]
+- Matrix:
+  1.000 -0.000 -0.000 -0.000
+  0.000  1.000 -0.000 -0.025
+  0.000  0.000  1.000  1.187
+  0.000  0.000  0.000  1.000</pre>
+<p>With every joint at 0 the arm stands straight up: the hand is 1.187 m above the base, and 0.025 m to the side because of the offsets of the links. Now <strong>move a slider</strong> in the joint window (try <code>joint_2</code>) while <code>tf2_echo</code> runs: the numbers change as the arm moves in RViz. This is the whole idea of <strong>forward kinematics</strong>, finding the pose of the hand from the joint angles, and TF does it for you here. In B2 you will do it by hand.</p>
+<p>Your own program can ask the same question. Stop <code>tf2_echo</code> and run <code>where</code> in <strong>T3</strong> (in <code>code/06-frames</code>, sourced as in step 2), moving the sliders as before:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run a6_frames where.py --ros-args -p source:=base_link -p target:=end_effector_link</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a6_frames where --ros-args -p source:=base_link -p target:=end_effector_link</code></pre></div>
+<pre class="out">[INFO] [1794055715.395731413] [where]: end_effector_link in base_link: x=-0.000 y=-0.025 z=1.187
+[INFO] [1794055716.388264846] [where]: end_effector_link in base_link: x=-0.000 y=-0.025 z=1.187</pre>
+<p>(The two lines are the zero position, as printed before the sliders were touched.) Close the windows and stop everything with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+<div class="callout"><strong class="t">The real arm, the same way</strong>
+The real arm's driver publishes <code>/joint_states</code> too, and the same <code>robot_state_publisher</code> turns it into frames. So everything in this step, <code>tf2_echo</code>, RViz, your <code>where</code> node, works the same on the real arm and on the digital twin: that is the point of the course.</div>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li>with <code>orbit</code> and the static publisher running, <code>tf2_echo base tip</code> prints a position that changes, and <code>view_frames</code> draws <code>base → marker → tip</code>,</li>
+<li>RViz shows the three labelled frames moving,</li>
+<li><code>where</code> prints <code>marker in base</code>, <code>tip in base</code> and, for <code>target:=nothing</code>, a warning without a crash,</li>
+<li><code>tf2_echo base_link end_effector_link</code> changes when you move a slider of the arm.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all four are true.</div>
+
+<h2>5. Exercise</h2>
+<p>Add a frame called <code>top</code> that sits 0.1 m <strong>above</strong> <code>tip</code> (along <em>z</em>), with another <code>static_transform_publisher</code>. <strong>Before you run anything</strong>, predict: with <code>orbit</code> running, what are <em>x</em>, <em>y</em> and <em>z</em> of <code>top</code> in <code>base</code>, compared with those of <code>tip</code>? Then check it with <code>where</code>.</p>
+<details>
+<summary>Answer</summary>
+<p>Start it (with <code>orbit</code> and the first static frame running):</p>
+<pre class="cmd"><code>ros2 run tf2_ros static_transform_publisher --z 0.1 --frame-id tip --child-frame-id top</code></pre>
+<div class="lang py"><pre class="cmd"><code>ros2 run a6_frames where.py --ros-args -p target:=top</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run a6_frames where --ros-args -p target:=top</code></pre></div>
+<pre class="out">[INFO] [1794055700.395448385] [where]: top in base: x=0.356 y=0.183 z=0.300
+[INFO] [1794055701.387949930] [where]: top in base: x=0.224 y=0.331 z=0.300
+[INFO] [1794055702.387859224] [where]: top in base: x=0.038 y=0.398 z=0.300</pre>
+<p><code>x</code> and <code>y</code> are the same as for <code>tip</code> (compare the first line with the <code>tip</code> output above: 0.356, 0.183), and <code>z</code> is 0.3 = 0.2 + 0.1. The offset is along <em>z</em>, and the rotation of <code>marker</code> is about <em>z</em>, so turning does not change an offset along <em>z</em>: it only moves it around the circle. The tree is now <code>base → marker → tip → top</code>. (We ran this with the Python <code>where</code>.)</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A <strong>frame</strong> is a point of view (origin and axes). Positions only mean something <em>in a frame</em>. ROS 2: metres, radians, <em>x</em> forward, <em>y</em> left, <em>z</em> up; RViz draws x, y, z as red, green, blue.</li>
+<li>A <strong>transform</strong> is a translation <em>(x, y, z)</em> and a rotation (a quaternion <em>(x, y, z, w)</em>; no rotation is <em>(0, 0, 0, 1)</em>, a turn about <em>z</em> by <em>θ</em> is <em>(0, 0, sin(θ/2), cos(θ/2))</em>). It is sent as a <code>TransformStamped</code>: parent in <code>header.frame_id</code>, child in <code>child_frame_id</code>.</li>
+<li>Frames form a <strong>tree</strong>, one parent each. TF combines the transforms along the path, in either direction. A frame exists only while someone publishes it.</li>
+<li><code>/tf</code> carries frames that move, <code>/tf_static</code> frames that do not (sent once, kept for late joiners). <code>static_transform_publisher</code> makes a fixed frame from the command line; a <code>TransformBroadcaster</code> in a node makes a moving one.</li>
+<li>A <code>TransformListener</code> fills a <code>Buffer</code>; <code>lookup_transform(source, target, time)</code> answers "where is <code>target</code> in <code>source</code>", and can fail (catch the exception). <code>tf2_echo source target</code> asks the same from the command line.</li>
+<li><code>view_frames</code> draws the tree; RViz's TF display shows the frames; <strong>Fixed Frame</strong> is the point of view of the picture.</li>
+<li>The arm's frames come from <code>robot_state_publisher</code>: <code>/joint_states</code> + the description in, <code>/tf</code> and <code>/tf_static</code> out. The same works for the real arm.</li>
+</ul>
+
+<nav class="pager">
+<a href="a5-packages-workspaces.html"><small>Previous</small>A5 · Packages and workspaces</a>
+<span class="soon next"><small>Next</small>A7 · ros2_control (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
