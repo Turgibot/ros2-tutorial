@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A5 · Packages and workspaces</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A5 · Packages and workspaces</h1>
+<p class="lead">Create a package of your own, build it in a workspace, and understand how several workspaces stack on top of each other, which is how your code will sit on top of the Kinova software.</p>
+
+<h2>1. Goal</h2>
+<p>In A1 to A4 you used a <code>package.xml</code> and a <code>CMakeLists.txt</code> that were handed to you, and ran <code>colcon build</code> and <code>source</code> without knowing exactly what they do. This lesson explains them. Every program in the course ends up in a package, and the Kinova software is a workspace full of packages, so you need to know how to make one and how it is found.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>created a <strong>package</strong> with <code>ros2 pkg create</code>, read the files it contains, built it and run its program,</li>
+<li>seen what editing and rebuilding does, and what <code>--symlink-install</code> changes,</li>
+<li>built a second <strong>workspace</strong> that <strong>overlays</strong> the first, and seen in which order ROS 2 searches them,</li>
+<li>looked at how a package declares its <strong>dependencies</strong>, using a Kinova package as the example.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>Package</h3>
+<p>A <strong>package</strong> is a folder with a <code>package.xml</code> file in it. It is the unit that ROS 2 builds, installs, finds by name (<code>ros2 run a5_hello hello</code>: <code>a5_hello</code> is the package) and shares. A package holds code, and possibly interfaces (<code>.msg</code>, <code>.srv</code>, <code>.action</code> files as in A2 and A3), launch files and parameter files (A4).</p>
+<ul>
+<li><code>package.xml</code> says who the package is (name, version, maintainer, license) and what it <strong>depends</strong> on.</li>
+<li>A second file says how to build it. The <strong>build type</strong> picks the tool: <code>ament_cmake</code> (<code>CMakeLists.txt</code>) for C++, interfaces, or a mix of languages, and <code>ament_python</code> (<code>setup.py</code>) for pure Python. A4 used <code>ament_cmake</code> for both languages, because it contained both.</li>
+</ul>
+
+<h3>Workspace</h3>
+<p>A <strong>workspace</strong> is a folder that holds packages in a <code>src/</code> folder. <code>colcon build</code>, run in the workspace folder, finds every package under <code>src/</code>, builds them in dependency order, and creates the three folders you know from A0: <code>build/</code>, <code>install/</code> and <code>log/</code>. In A1 to A4 the workspace and the package were the same folder, to keep things short. From now on we use the normal layout:</p>
+<pre class="out">my_ws/
+  src/
+    a5_hello/        the package: package.xml, code, ...
+  build/             (created by colcon)
+  install/           (created by colcon)
+  log/               (created by colcon)</pre>
+
+<h3>Underlay and overlay</h3>
+<p>Workspaces can be stacked. ROS 2 itself is a workspace (<code>/opt/ros/jazzy</code>), the Kinova software is another (built on top of it), and yours can be a third. A workspace that you source <em>after</em> another one is an <strong>overlay</strong> on it, and the first is its <strong>underlay</strong>. When two workspaces contain a package with the same name, ROS 2 uses the one from the overlay. The order of sourcing decides, as you will see in step 5. This is how you can replace one package of a big system with your own modified copy, without touching the original.</p>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5), in the <code>ros2-tutorial</code> folder unless a step says otherwise. Choose your language with the <strong>Python / C++</strong> switch at the top right: it changes the kind of package you create. The files you create here are in <code>code/05-packages/my_ws</code> and <code>my_ws2</code>, which git ignores.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Create a workspace and a package</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span> Make the workspace folders and, inside <code>src</code>, a package called <code>a5_hello</code> with one program called <code>hello</code>:</p>
+<div class="lang py"><pre class="cmd"><code>mkdir -p code/05-packages/my_ws/src
+cd code/05-packages/my_ws/src
+ros2 pkg create --build-type ament_python --license Apache-2.0 --description "My first package" --node-name hello a5_hello</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>mkdir -p code/05-packages/my_ws/src
+cd code/05-packages/my_ws/src
+ros2 pkg create --build-type ament_cmake --license Apache-2.0 --description "My first package" --node-name hello a5_hello</code></pre></div>
+<div class="lang py"><pre class="out">going to create a new package
+package name: a5_hello
+destination directory: /workspace/code/05-packages/my_ws/src
+package format: 3
+version: 0.0.0
+description: My first package
+maintainer: ['ubuntu &lt;ubuntu@todo.todo&gt;']
+licenses: ['Apache-2.0']
+build type: ament_python
+dependencies: []
+node_name: hello
+creating folder ./a5_hello
+creating ./a5_hello/package.xml
+creating source folder
+creating folder ./a5_hello/a5_hello
+creating ./a5_hello/setup.py
+creating ./a5_hello/setup.cfg
+creating folder ./a5_hello/resource
+creating ./a5_hello/resource/a5_hello
+creating ./a5_hello/a5_hello/__init__.py
+creating folder ./a5_hello/test
+creating ./a5_hello/test/test_copyright.py
+creating ./a5_hello/test/test_flake8.py
+creating ./a5_hello/test/test_pep257.py
+creating ./a5_hello/a5_hello/hello.py</pre></div>
+<div class="lang cpp"><pre class="out">going to create a new package
+package name: a5_hello
+destination directory: /workspace/code/05-packages/my_ws/src
+package format: 3
+version: 0.0.0
+description: My first package
+maintainer: ['ubuntu &lt;ubuntu@todo.todo&gt;']
+licenses: ['Apache-2.0']
+build type: ament_cmake
+dependencies: []
+node_name: hello
+creating folder ./a5_hello
+creating ./a5_hello/package.xml
+creating source and include folder
+creating folder ./a5_hello/src
+creating folder ./a5_hello/include/a5_hello
+creating ./a5_hello/CMakeLists.txt
+creating ./a5_hello/src/hello.cpp</pre></div>
+<p>The tool wrote a complete, buildable package. (The maintainer line shows <code>ubuntu</code> in the container, and your own user name in a local install.) Go back up to the workspace folder and list what was created:</p>
+<pre class="cmd"><code>cd ..
+find src -type f | sort</code></pre>
+<div class="lang py"><pre class="out">src/a5_hello/LICENSE
+src/a5_hello/a5_hello/__init__.py
+src/a5_hello/a5_hello/hello.py
+src/a5_hello/package.xml
+src/a5_hello/resource/a5_hello
+src/a5_hello/setup.cfg
+src/a5_hello/setup.py
+src/a5_hello/test/test_copyright.py
+src/a5_hello/test/test_flake8.py
+src/a5_hello/test/test_pep257.py</pre></div>
+<div class="lang cpp"><pre class="out">src/a5_hello/CMakeLists.txt
+src/a5_hello/LICENSE
+src/a5_hello/package.xml
+src/a5_hello/src/hello.cpp</pre></div>
+</li>
+
+<li>
+<h3>Read the package files</h3>
+<p>This is <code>src/a5_hello/package.xml</code>, as generated:</p>
+<div class="lang py"><pre class="src" data-file="src/a5_hello/package.xml"><code>&lt;?xml version="1.0"?&gt;
+&lt;?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?&gt;
+&lt;package format="3"&gt;
+  &lt;name&gt;a5_hello&lt;/name&gt;
+  &lt;version&gt;0.0.0&lt;/version&gt;
+  &lt;description&gt;My first package&lt;/description&gt;
+  &lt;maintainer email="ubuntu@todo.todo"&gt;ubuntu&lt;/maintainer&gt;
+  &lt;license&gt;Apache-2.0&lt;/license&gt;
+
+  &lt;test_depend&gt;ament_copyright&lt;/test_depend&gt;
+  &lt;test_depend&gt;ament_flake8&lt;/test_depend&gt;
+  &lt;test_depend&gt;ament_pep257&lt;/test_depend&gt;
+  &lt;test_depend&gt;python3-pytest&lt;/test_depend&gt;
+
+  &lt;export&gt;
+    &lt;build_type&gt;ament_python&lt;/build_type&gt;
+  &lt;/export&gt;
+&lt;/package&gt;</code></pre></div>
+<div class="lang cpp"><pre class="src" data-file="src/a5_hello/package.xml"><code>&lt;?xml version="1.0"?&gt;
+&lt;?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?&gt;
+&lt;package format="3"&gt;
+  &lt;name&gt;a5_hello&lt;/name&gt;
+  &lt;version&gt;0.0.0&lt;/version&gt;
+  &lt;description&gt;My first package&lt;/description&gt;
+  &lt;maintainer email="ubuntu@todo.todo"&gt;ubuntu&lt;/maintainer&gt;
+  &lt;license&gt;Apache-2.0&lt;/license&gt;
+
+  &lt;buildtool_depend&gt;ament_cmake&lt;/buildtool_depend&gt;
+
+  &lt;test_depend&gt;ament_lint_auto&lt;/test_depend&gt;
+  &lt;test_depend&gt;ament_lint_common&lt;/test_depend&gt;
+
+  &lt;export&gt;
+    &lt;build_type&gt;ament_cmake&lt;/build_type&gt;
+  &lt;/export&gt;
+&lt;/package&gt;</code></pre></div>
+<ul>
+<li><code>name</code>, <code>version</code>, <code>description</code>, <code>maintainer</code>, <code>license</code>: the identity. The name must be unique among the packages you have, and is what you type after <code>ros2 run</code>. The author and license are placeholders you would change for a package you share.</li>
+<li><code>export / build_type</code>: which build tool builds it.</li>
+<li>The <code>depend</code> lines say what the package needs. They are explained in step 6. This package needs nothing but its build tool, so there are none yet apart from the tests.</li>
+</ul>
+<div class="lang py">
+<p>The build file for <code>ament_python</code> is <code>setup.py</code>:</p>
+<pre class="src" data-file="src/a5_hello/setup.py"><code>from setuptools import find_packages, setup
+
+package_name = 'a5_hello'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='ubuntu',
+    maintainer_email='ubuntu@todo.todo',
+    description='My first package',
+    license='Apache-2.0',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': [
+            'hello = a5_hello.hello:main'
+        ],
+    },
+)</code></pre>
+<ul>
+<li><code>packages=find_packages(...)</code>: the Python code to install (the folder <code>a5_hello/</code> with <code>__init__.py</code> and <code>hello.py</code>).</li>
+<li><code>data_files</code>: extra files to copy into <code>install/a5_hello/share/a5_hello</code>: the <code>package.xml</code>, and the empty file <code>resource/a5_hello</code>, whose only job is to register the package name with ROS 2.</li>
+<li><code>entry_points</code> / <code>console_scripts</code>: <code>'hello = a5_hello.hello:main'</code> means "make a program called <code>hello</code> that runs the function <code>main</code> of the module <code>a5_hello.hello</code>". That is what <code>ros2 run a5_hello hello</code> starts. The file <code>setup.cfg</code> tells the build to put that program in <code>lib/a5_hello</code>, where <code>ros2 run</code> looks.</li>
+</ul>
+<p>And the program itself, <code>a5_hello/hello.py</code>, is two lines of Python: <code>main()</code> prints <code>Hi from a5_hello.</code></p>
+</div>
+<div class="lang cpp">
+<p>The build file for <code>ament_cmake</code> is <code>CMakeLists.txt</code>. The generated one also has comments and a block for tests, left out here. The compiler options and <code>target_*</code> lines in the middle are boilerplate you can ignore:</p>
+<pre class="src" data-file="src/a5_hello/CMakeLists.txt"><code>cmake_minimum_required(VERSION 3.8)
+project(a5_hello)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+
+add_executable(hello src/hello.cpp)
+target_include_directories(hello PUBLIC
+  $&lt;BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include&gt;
+  $&lt;INSTALL_INTERFACE:include/${PROJECT_NAME}&gt;)
+target_compile_features(hello PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+
+install(TARGETS hello
+  DESTINATION lib/${PROJECT_NAME})
+
+ament_package()</code></pre>
+<ul>
+<li><code>project(a5_hello)</code>: the package name again. It must match <code>package.xml</code>.</li>
+<li><code>find_package(ament_cmake REQUIRED)</code>: the build tool. Each package you depend on also needs a <code>find_package</code> line here (as in A1: <code>rclcpp</code>, <code>std_msgs</code>).</li>
+<li><code>add_executable(hello src/hello.cpp)</code> (followed by the <code>target_include_directories</code> and <code>target_compile_features</code> boilerplate): compile this file into a program called <code>hello</code>.</li>
+<li><code>install(TARGETS hello DESTINATION lib/${PROJECT_NAME})</code>: put it in <code>install/a5_hello/lib/a5_hello</code>, where <code>ros2 run</code> looks. Without an <code>install</code> line, the program is built but never found.</li>
+<li><code>ament_package()</code> must be the last line.</li>
+</ul>
+<p>And the program itself, <code>src/hello.cpp</code>, is a <code>main</code> that prints <code>hello world a5_hello package</code> with <code>printf</code>. It does not use ROS 2 at all: a package does not have to.</p>
+</div>
+</li>
+
+<li>
+<h3>Build and run</h3>
+<pre class="cmd"><code>colcon build
+source install/setup.bash
+ros2 run a5_hello hello</code></pre>
+<div class="lang py"><pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.47s]
+
+Summary: 1 package finished [0.52s]
+Hi from a5_hello.</pre></div>
+<div class="lang cpp"><pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.57s]
+
+Summary: 1 package finished [0.61s]
+hello world a5_hello package</pre></div>
+<p>Where did the program land, and does <code>colcon</code> know the package?</p>
+<pre class="cmd"><code>find install/a5_hello -name "hello*"
+colcon list
+ros2 pkg prefix a5_hello</code></pre>
+<div class="lang py"><pre class="out">install/a5_hello/lib/a5_hello/hello
+install/a5_hello/lib/python3.12/site-packages/a5_hello/__pycache__/hello.cpython-312.pyc
+install/a5_hello/lib/python3.12/site-packages/a5_hello/hello.py
+a5_hello	src/a5_hello	(ros.ament_python)
+/workspace/code/05-packages/my_ws/install/a5_hello</pre>
+<p>Two things were installed. <code>lib/a5_hello/hello</code> is the small launcher script made from the entry point, and the code it runs, <code>hello.py</code>, is a <em>copy</em> in <code>lib/python3.12/site-packages/a5_hello/</code>. The <code>.pyc</code> file is Python's cache of it. <code>colcon list</code> shows the packages colcon found under <code>src</code>, with their build type.</p></div>
+<div class="lang cpp"><pre class="out">install/a5_hello/lib/a5_hello/hello
+a5_hello	src/a5_hello	(ros.ament_cmake)
+/workspace/code/05-packages/my_ws/install/a5_hello</pre>
+<p>The compiled program is in <code>lib/a5_hello/hello</code>, as in A1. <code>colcon list</code> shows the packages colcon found under <code>src</code>, with their build type.</p></div>
+</li>
+
+<li>
+<h3>Edit, rebuild, and <code>--symlink-install</code></h3>
+<p>Change the message the program prints (the command below does it for you; you can also edit the file by hand), then run the program <em>without</em> building:</p>
+<div class="lang py"><pre class="cmd"><code>sed -i 's/Hi from a5_hello\./Hi from a5_hello, version 1./' src/a5_hello/a5_hello/hello.py
+ros2 run a5_hello hello</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>sed -i 's/hello world a5_hello package/hello from a5_hello, version 1/' src/a5_hello/src/hello.cpp
+ros2 run a5_hello hello</code></pre></div>
+<div class="lang py"><pre class="out">Hi from a5_hello.</pre></div>
+<div class="lang cpp"><pre class="out">hello world a5_hello package</pre></div>
+<p>Still the old message: <code>ros2 run</code> runs what is in <code>install/</code>, and <code>install/</code> holds a <em>copy</em> made at the last build, not your source file. Build again:</p>
+<pre class="cmd"><code>colcon build
+ros2 run a5_hello hello</code></pre>
+<div class="lang py"><pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.47s]
+
+Summary: 1 package finished [0.52s]
+Hi from a5_hello, version 1.</pre></div>
+<div class="lang cpp"><pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.10s]
+
+Summary: 1 package finished [0.14s]
+hello from a5_hello, version 1</pre></div>
+<p>Having to rebuild after every edit gets tedious. The option <code>--symlink-install</code> makes <code>install/</code> hold <em>links</em> to your source files instead of copies, for the files that are simply copied:</p>
+<div class="lang py">
+<pre class="cmd"><code>colcon build --symlink-install
+source install/setup.bash
+sed -i 's/version 1/version 1b/' src/a5_hello/a5_hello/hello.py
+ros2 run a5_hello hello</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.63s]
+
+Summary: 1 package finished [0.67s]
+Hi from a5_hello, version 1b.</pre>
+<p>The edit took effect without a build. Source the workspace again after switching to <code>--symlink-install</code>: the way Python finds the package changes, and the old shell would fail with <code>No package metadata was found for a5-hello</code>. So with Python, every code edit is live. Put the message back with <code>sed -i 's/version 1b/version 1/' src/a5_hello/a5_hello/hello.py</code>.</p>
+</div>
+<div class="lang cpp">
+<pre class="cmd"><code>colcon build --symlink-install
+source install/setup.bash
+sed -i 's/version 1/version 1b/' src/a5_hello/src/hello.cpp
+ros2 run a5_hello hello</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.30s]
+
+Summary: 1 package finished [0.35s]
+hello from a5_hello, version 1</pre>
+<p>Still <code>version 1</code>: a compiled program must be compiled again, links or not. What <code>--symlink-install</code> helps with in C++ packages is the files that are only copied: launch files, YAML files and Python scripts (the exercise below uses this). Put the message back with <code>sed -i 's/version 1b/version 1/' src/a5_hello/src/hello.cpp</code> and run <code>colcon build</code>.</p>
+</div>
+</li>
+
+<li>
+<h3>Stack a second workspace on the first</h3>
+<p>Which workspaces does this shell search, and in what order? ROS 2 keeps the list in <code>AMENT_PREFIX_PATH</code>. Print its first three entries:</p>
+<pre class="cmd"><code>echo $AMENT_PREFIX_PATH | tr : '\n' | sed -n '1,3p'</code></pre>
+<pre class="out">/workspace/code/05-packages/my_ws/install/a5_hello
+/opt/kortex_ws/install/kortex_bringup
+/opt/kortex_ws/install/kinova_gen3_lite_moveit_config</pre>
+<p>Your workspace is first, then the Kinova packages (the list continues with the rest of the Kinova workspace and, at the very end, <code>/opt/ros/jazzy</code>). The list is searched from the top. Sourcing a workspace adds its packages to the <em>front</em>. Now make a second workspace with its own <code>a5_hello</code>, different from the first (version 2), and build it in this same shell, where <code>my_ws</code> is already sourced:</p>
+<div class="lang py"><pre class="cmd"><code>cd ..
+mkdir -p my_ws2/src
+cp -r my_ws/src/a5_hello my_ws2/src/
+sed -i 's/version 1/version 2/' my_ws2/src/a5_hello/a5_hello/hello.py
+cd my_ws2
+colcon build
+source install/setup.bash
+ros2 run a5_hello hello
+ros2 pkg prefix a5_hello
+echo $AMENT_PREFIX_PATH | tr : '\n' | sed -n '1,3p'</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>cd ..
+mkdir -p my_ws2/src
+cp -r my_ws/src/a5_hello my_ws2/src/
+sed -i 's/version 1/version 2/' my_ws2/src/a5_hello/src/hello.cpp
+cd my_ws2
+colcon build
+source install/setup.bash
+ros2 run a5_hello hello
+ros2 pkg prefix a5_hello
+echo $AMENT_PREFIX_PATH | tr : '\n' | sed -n '1,3p'</code></pre></div>
+<div class="lang py"><pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.47s]
+
+Summary: 1 package finished [0.51s]
+Hi from a5_hello, version 2.
+/workspace/code/05-packages/my_ws2/install/a5_hello
+/workspace/code/05-packages/my_ws2/install/a5_hello
+/workspace/code/05-packages/my_ws/install/a5_hello
+/opt/kortex_ws/install/kortex_bringup</pre></div>
+<div class="lang cpp"><pre class="out">Starting &gt;&gt;&gt; a5_hello
+Finished &lt;&lt;&lt; a5_hello [0.55s]
+
+Summary: 1 package finished [0.60s]
+hello from a5_hello, version 2
+/workspace/code/05-packages/my_ws2/install/a5_hello
+/workspace/code/05-packages/my_ws2/install/a5_hello
+/workspace/code/05-packages/my_ws/install/a5_hello
+/opt/kortex_ws/install/kortex_bringup</pre></div>
+<p>Two packages named <code>a5_hello</code> exist, and the overlay (<code>my_ws2</code>) won: it ran version 2, <code>ros2 pkg prefix</code> says it comes from <code>my_ws2</code> (the second printed line), and in the path list (the last three lines) <code>my_ws2</code> comes before <code>my_ws</code>. The original <code>my_ws</code> was not changed.</p>
+<p>The layering lives in the shell, not in the files. Open a <strong>new terminal</strong> (and a container with <code>docker/run_ros2.sh</code> if you use Docker) in the <code>ros2-tutorial</code> folder, and source only the first workspace:</p>
+<pre class="cmd"><code>cd code/05-packages
+source my_ws/install/setup.bash
+ros2 run a5_hello hello
+ros2 pkg prefix a5_hello</code></pre>
+<div class="lang py"><pre class="out">Hi from a5_hello, version 1.
+/workspace/code/05-packages/my_ws/install/a5_hello</pre></div>
+<div class="lang cpp"><pre class="out">hello from a5_hello, version 1
+/workspace/code/05-packages/my_ws/install/a5_hello</pre></div>
+<p>Version 1 again. Now, in a third new terminal, source only the overlay:</p>
+<pre class="cmd"><code>cd code/05-packages
+source my_ws2/install/setup.bash
+ros2 run a5_hello hello
+echo $AMENT_PREFIX_PATH | tr : '\n' | sed -n '1,3p'</code></pre>
+<div class="lang py"><pre class="out">Hi from a5_hello, version 2.
+/workspace/code/05-packages/my_ws2/install/a5_hello
+/workspace/code/05-packages/my_ws/install/a5_hello
+/opt/kortex_ws/install/kortex_bringup</pre></div>
+<div class="lang cpp"><pre class="out">hello from a5_hello, version 2
+/workspace/code/05-packages/my_ws2/install/a5_hello
+/workspace/code/05-packages/my_ws/install/a5_hello
+/opt/kortex_ws/install/kortex_bringup</pre></div>
+<p>Sourcing <code>my_ws2</code> alone also brought in <code>my_ws</code>. An overlay <em>remembers</em> the workspaces that were sourced when it was built, and sources them first. So you always source only the top workspace of your stack. It also means that the order you build in matters: build an overlay in a shell where its underlays are sourced.</p>
+<div class="callout"><strong class="t">Why this matters for the arm</strong>
+The Kinova software is an overlay on ROS 2, and the Docker run script sources it for you. Your own packages in later lessons will be one more overlay on top of it, built in a shell where both are sourced.</div>
+</li>
+
+<li>
+<h3>Declare what a package needs</h3>
+<p>A package lists the other packages it needs in <code>package.xml</code>. Look at the list of a Kinova package. <code>ros2 pkg prefix --share</code> gives the folder where the installed <code>package.xml</code> sits:</p>
+<pre class="cmd"><code>grep depend $(ros2 pkg prefix --share kortex_bringup)/package.xml | head -8</code></pre>
+<pre class="out">  &lt;buildtool_depend&gt;ament_cmake&lt;/buildtool_depend&gt;
+  &lt;buildtool_depend&gt;ament_cmake_python&lt;/buildtool_depend&gt;
+  &lt;exec_depend&gt;rclpy&lt;/exec_depend&gt;
+  &lt;exec_depend&gt;controller_manager&lt;/exec_depend&gt;
+  &lt;exec_depend&gt;joint_state_publisher&lt;/exec_depend&gt;
+  &lt;exec_depend&gt;launch&lt;/exec_depend&gt;
+  &lt;exec_depend&gt;launch_ros&lt;/exec_depend&gt;
+  &lt;exec_depend&gt;rviz2&lt;/exec_depend&gt;</pre>
+<p>There are a few kinds of dependency:</p>
+<table>
+<tr><th>Tag</th><th>Meaning</th><th>Example</th></tr>
+<tr><td><code>buildtool_depend</code></td><td>a tool needed to build the package</td><td><code>ament_cmake</code></td></tr>
+<tr><td><code>build_depend</code></td><td>needed to compile (headers, libraries)</td><td><code>std_msgs</code> in a C++ package</td></tr>
+<tr><td><code>exec_depend</code></td><td>needed only to run</td><td><code>rclpy</code>, <code>rviz2</code> above</td></tr>
+<tr><td><code>depend</code></td><td>both of the previous (the usual choice)</td><td><code>rclcpp</code> (our A1 package used this)</td></tr>
+<tr><td><code>test_depend</code></td><td>needed only for tests</td><td><code>ament_lint_auto</code></td></tr>
+</table>
+<p>The list is used twice. <code>colcon build</code> builds packages in the order their dependencies need. And <code>rosdep install --from-paths src</code> reads it to install the system packages that are missing: this is what the Dockerfile (and the local install in A0) did to install Gazebo, MoveIt 2 and ros2_control for the Kinova workspace. For a C++ package, a dependency also needs a <code>find_package(...)</code> line in <code>CMakeLists.txt</code>, as you did in A1.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li><code>ros2 run a5_hello hello</code> prints your message from <code>my_ws</code>, and <code>ros2 pkg prefix a5_hello</code> points into <code>my_ws/install</code>,</li>
+<li>in a shell where only <code>my_ws2</code> is sourced it prints version 2, and the first entry of <code>AMENT_PREFIX_PATH</code> is in <code>my_ws2</code>,</li>
+<li><code>ros2 pkg prefix --share kortex_bringup</code> prints a folder under <code>/opt/kortex_ws/install</code> (under <code>~/kortex_ws/install</code> in a local install).</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all three are true.</div>
+
+<h2>5. Exercise</h2>
+<p>In A4, changing <code>config/announcers.yaml</code> had no effect until you ran <code>colcon build</code> again. Rebuild <code>code/04-parameters-launch</code> so that you never need to rebuild after editing that file (in a fresh shell, in that folder), then change <code>name: putdown</code> to <code>name: pickup</code> in the YAML file and launch. What do you build with, and what do you hear?</p>
+<details>
+<summary>Answer</summary>
+<pre class="cmd"><code>cd code/04-parameters-launch
+colcon build --symlink-install
+source install/setup.bash</code></pre>
+<p>Now <code>install/a4_params/share/a4_params/config</code> is a link to your source folder, so <code>ros2 launch a4_params announcers.launch.py</code> reads your edited file at once. After the edit the listener hears <code>pickup F</code> (planner_b) in place of <code>putdown F</code>, with no rebuild. We ran exactly this (with the Python programs). The edit of a launch file works the same way.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A <strong>package</strong> is a folder with a <code>package.xml</code>, plus a build file: <code>CMakeLists.txt</code> (<code>ament_cmake</code>, for C++ and interfaces) or <code>setup.py</code> (<code>ament_python</code>). <code>ros2 pkg create --build-type ... --node-name ... name</code> makes a working one.</li>
+<li>A <strong>workspace</strong> holds packages in <code>src/</code>; <code>colcon build</code> in its folder creates <code>build/</code>, <code>install/</code> and <code>log/</code>. <code>colcon list</code> shows what it found.</li>
+<li><code>ros2 run</code> runs what is in <code>install/</code>, a copy made at build time. Rebuild after edits, or use <code>colcon build --symlink-install</code> (and source again) for Python, launch and YAML files. Compiled C++ always needs a build.</li>
+<li><strong>Overlay</strong>: a workspace sourced after another one wins for packages with the same name, and remembers its underlays. <code>AMENT_PREFIX_PATH</code> is the search list, front first.</li>
+<li><code>package.xml</code> declares dependencies (<code>depend</code>, <code>exec_depend</code>, ...). <code>colcon</code> uses them for build order and <code>rosdep install</code> for system packages.</li>
+</ul>
+
+<nav class="pager">
+<a href="a4-parameters-launch.html"><small>Previous</small>A4 · Parameters and launch files</a>
+<span class="soon next"><small>Next</small>A6 · Frames and TF2 (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
