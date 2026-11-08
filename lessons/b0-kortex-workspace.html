@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B0 · The Kinova workspace</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part B · The Kinova Gen3</span></header>
+<main>
+
+<h1>B0 · The Kinova workspace</h1>
+<p class="lead">Open up the workspace that holds the arm's software: what is in it, where it came from, how it was built, and how to change one of its packages without touching the original.</p>
+
+<h2>1. Goal</h2>
+<p>Since A0 the arm's launch files have simply worked. This lesson explains what is behind them, because from Part B on you will read the arm's files and sometimes change them. The workspace was built for you, by the Docker image or by the local install steps of A0. Here you only <em>look</em> at it, and then make one change of your own in an overlay (A5), which is the safe way to experiment.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>found the Kinova workspace and the exact version of <code>ros2_kortex</code> it was built from,</li>
+<li>read the <code>.repos</code> files that list the other source packages it needs, and counted all 76 packages by origin,</li>
+<li>seen what the seven Kinova packages are for,</li>
+<li>read the three build steps (<code>vcs import</code>, <code>rosdep install</code>, <code>colcon build</code>) and why each is needed,</li>
+<li>copied one Kinova package into your own workspace, changed it, and seen RViz use your version.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>ros2_kortex</h3>
+<p><strong><code>ros2_kortex</code></strong> is the repository (a folder of packages, kept in git) that Kinova publishes for ROS 2. The <code>jazzy</code> branch is the one for our ROS 2 version. It holds seven packages:</p>
+<table>
+<tr><th>Package</th><th>What it is</th></tr>
+<tr><td><code>kortex_description</code></td><td>The <strong>model</strong> of the arms and grippers: the URDF (xacro) files, the 3D meshes, the RViz setup, and <code>view_robot.launch.py</code> from A6. Part of B1.</td></tr>
+<tr><td><code>kortex_bringup</code></td><td>The <strong>launch files and controller settings</strong> that start the arm: <code>gen3.launch.py</code> (A7), <code>kortex_sim_control.launch.py</code> (Gazebo, Part C) and the controller YAML files.</td></tr>
+<tr><td><code>kortex_driver</code></td><td>The <strong>hardware plugin</strong> for ros2_control that talks to the real arm over the network. It is what <code>use_fake_hardware:=true</code> replaces (A7).</td></tr>
+<tr><td><code>kortex_api</code></td><td>Kinova's own C++ library (a pre-built archive), which the driver uses to talk to the arm.</td></tr>
+<tr><td><code>kinova_gen3_7dof_robotiq_2f_85_moveit_config</code>, <code>kinova_gen3_6dof_robotiq_2f_85_moveit_config</code>, <code>kinova_gen3_lite_moveit_config</code></td><td>The <strong>MoveIt 2 settings</strong> for three arm variants (B4). We use the 7-DoF one.</td></tr>
+</table>
+
+<h3>Other source packages</h3>
+<p>The arm also needs ros2_control, its controllers, a Robotiq gripper driver, and the bridge between ROS 2 and Gazebo. Most of them exist as ready-made packages for Jazzy, but Kinova needs some that do <strong>not</strong>, or newer versions of them (a repository's own comments say "waiting for Jazzy sync"). So their <strong>source code</strong> is downloaded into the same workspace and compiled with it. Which repositories, and which branch of each, is written in small <strong>.repos</strong> files inside <code>ros2_kortex</code>: a list of git URLs and versions that the tool <code>vcs</code> reads.</p>
+
+<h3>Three steps to build it</h3>
+<ol>
+<li><strong><code>vcs import</code></strong>: download every repository listed in the <code>.repos</code> files into <code>src/</code>.</li>
+<li><strong><code>rosdep install</code></strong>: read the <code>package.xml</code> of every package (A5) and install, with <code>apt</code>, the ready-made packages they depend on (Gazebo, MoveIt 2, ...).</li>
+<li><strong><code>colcon build</code></strong>: compile all packages, in dependency order, into <code>install/</code> (A5). With 76 packages this takes minutes, where your own packages took seconds.</li>
+</ol>
+<p>The result is one workspace that you source after ROS 2 itself: an <strong>overlay</strong> (A5). Everything in this lesson follows from that.</p>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5), in the <code>ros2-tutorial</code> folder. Nothing needs the Python / C++ switch. The workspace is in <code>/opt/kortex_ws</code> in the container and in <code>~/kortex_ws</code> in a local install; the first step puts its folder into a shell variable, <code>KWS</code>, so that every command is the same for both.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Find the workspace</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span> A package's install folder is two levels below its workspace, so <code>ros2 pkg prefix</code> (A5) leads to it:</p>
+<pre class="cmd"><code>KWS=$(realpath $(ros2 pkg prefix kortex_description)/../..)
+echo $KWS
+ls $KWS</code></pre>
+<pre class="out">/opt/kortex_ws
+build
+install
+log
+src</pre>
+<p>These are the three folders every colcon workspace has (A5), plus <code>src</code> with the downloaded repositories:</p>
+<pre class="cmd"><code>ls $KWS/src</code></pre>
+<pre class="out">control_msgs
+control_toolbox
+generate_parameter_library
+gz_ros2_control
+picknik_controllers
+ros2_control
+ros2_control_cmake
+ros2_controllers
+ros2_kortex
+ros2_robotiq_gripper
+ros_gz
+serial</pre>
+<p>Twelve repositories: <code>ros2_kortex</code> is the one from Kinova, and the other eleven are what it depends on. Ask git which version of <code>ros2_kortex</code> you have. (The <code>-c safe.directory=...</code> part tells git that it is fine to read a folder owned by another user, as <code>/opt/kortex_ws</code> is in the container.)</p>
+<pre class="cmd"><code>G="git -c safe.directory=$KWS/src/ros2_kortex -C $KWS/src/ros2_kortex"
+$G branch --show-current
+$G log -1 --format='%h %ad %s' --date=short
+$G remote get-url origin</code></pre>
+<pre class="out">jazzy
+462dab9 2026-09-08 dependency repo branch update
+https://github.com/Kinovarobotics/ros2_kortex.git</pre>
+<p>The branch is <code>jazzy</code>, and the last change in it is the commit <code>462dab9</code> (your commit may be newer if the image was built later). Whenever something differs between your machine and a colleague's, this is the first thing to compare.</p>
+</li>
+
+<li>
+<h3>Read a <code>.repos</code> file</h3>
+<p><code>ros2_kortex</code> contains several of them, for different ROS versions. The Jazzy build uses three: <code>ros2_kortex.jazzy.repos</code>, <code>ros2_kortex-not-released.jazzy.repos</code> and <code>simulation.jazzy.repos</code>. The second one is short:</p>
+<pre class="cmd"><code>cat $KWS/src/ros2_kortex/ros2_kortex-not-released.jazzy.repos</code></pre>
+<pre class="out">repositories:
+  picknik_controllers:
+    type: git
+    url: https://github.com/picknikrobotics/picknik_controllers.git
+    version: main
+  ros2_robotiq_gripper:
+    type: git
+    url: https://github.com/picknikrobotics/ros2_robotiq_gripper.git
+    version: main
+  serial:
+    type: git
+    url: https://github.com/tylerjw/serial.git
+    version: ros2
+  gz_ros2_control:
+    type: git
+    url: https://github.com/ros-controls/gz_ros2_control.git
+    version: jazzy</pre>
+<p>It is YAML (as in A4). Each entry is a folder name in <code>src/</code> with the <code>url</code> to clone and the <code>version</code> to check out, a branch, a tag or a commit. "Not released" means that no ready-made Jazzy package of these exists, which is why they have to be compiled. The other two files list <code>ros2_control</code> and its controllers (<code>ros2_kortex.jazzy.repos</code>) and <code>ros_gz</code> (<code>simulation.jazzy.repos</code>). Some repositories are in more than one file; <code>vcs import --skip-existing</code> then clones each only once.</p>
+</li>
+
+<li>
+<h3>Count the packages</h3>
+<p><code>colcon list</code> (A5) lists the packages under a folder. A repository can hold many packages, so count them per repository. Run it from <code>/tmp</code>, because colcon writes a <code>log</code> folder where it runs and the workspace is read-only:</p>
+<pre class="cmd"><code>cd /tmp
+colcon list --base-paths $KWS/src | wc -l
+colcon list --base-paths $KWS/src | awk '{print $2}' | sed "s|^$KWS/src/||" | cut -d/ -f1 | sort | uniq -c
+cd -</code></pre>
+<pre class="out">76
+      1 control_msgs
+      1 control_toolbox
+      6 generate_parameter_library
+      3 gz_ros2_control
+      2 picknik_controllers
+     11 ros2_control
+      1 ros2_control_cmake
+     32 ros2_controllers
+      7 ros2_kortex
+      4 ros2_robotiq_gripper
+      7 ros_gz
+      1 serial
+/workspace</pre>
+<p>76 packages in all, and only 7 of them are Kinova's. The rest is the machinery under them: ros2_control and 32 controllers (A7), the Robotiq gripper, and the Gazebo bridge. (<code>cd -</code> takes you back to the folder you came from and prints it: <code>/workspace</code> in the container, your <code>ros2-tutorial</code> folder in a local install.) Those 7 are the table in the concepts. Look at the description and the launch files of two of them:</p>
+<pre class="cmd"><code>ls $KWS/src/ros2_kortex/kortex_description $KWS/src/ros2_kortex/kortex_description/arms $KWS/src/ros2_kortex/kortex_bringup/launch</code></pre>
+<pre class="out">/opt/kortex_ws/src/ros2_kortex/kortex_bringup/launch:
+gen3.launch.py
+gen3_lite.launch.py
+kortex_control.launch.py
+kortex_sim_control.launch.py
+test_huge_joint_space_jump.launch.py
+test_joint_trajectory_controller.launch.py
+
+/opt/kortex_ws/src/ros2_kortex/kortex_description:
+CHANGELOG.rst
+CMakeLists.txt
+arms
+config
+grippers
+launch
+multiple_robots
+package.xml
+readme.md
+robots
+rviz
+
+/opt/kortex_ws/src/ros2_kortex/kortex_description/arms:
+gen3
+gen3_lite</pre>
+<p>(<code>ls</code> sorts the three folders by name, so the launch folder comes first.) In <code>kortex_description</code> there are folders for <code>arms</code> (<code>gen3</code> and <code>gen3_lite</code>), <code>grippers</code>, <code>robots</code> (the xacro that puts an arm and a gripper together), <code>launch</code>, and <code>rviz</code>. <code>kortex_bringup/launch</code> holds the launch files you have used: <code>gen3.launch.py</code> and, for Gazebo in Part C, <code>kortex_sim_control.launch.py</code>.</p>
+</li>
+
+<li>
+<h3>How it was built</h3>
+<p>The three steps are in the Dockerfile that built your image (the local install of A0 runs the same ones by hand). This is the part that matters (comments shortened):</p>
+<pre class="src" data-file="docker/Dockerfile, lines 12-26"><code>ARG KORTEX_REF=jazzy
+ENV KORTEX_WS=/opt/kortex_ws
+WORKDIR $KORTEX_WS
+RUN git clone --branch "$KORTEX_REF" https://github.com/Kinovarobotics/ros2_kortex.git src/ros2_kortex \
+    &amp;&amp; for f in ros2_kortex.jazzy.repos ros2_kortex-not-released.jazzy.repos simulation.jazzy.repos; do \
+         vcs import src --skip-existing --input "src/ros2_kortex/$f"; done
+
+# System dependencies (Gazebo Harmonic, MoveIt 2, ros2_control, ...) resolved from the package.xml files.
+RUN apt-get update &amp;&amp; rosdep update --rosdistro jazzy \
+    &amp;&amp; rosdep install --ignore-src --from-paths src -y -r \
+    &amp;&amp; rm -rf /var/lib/apt/lists/*
+
+# Few parallel workers: the default can exhaust memory.
+RUN source /opt/ros/jazzy/setup.bash \
+    &amp;&amp; colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 6</code></pre>
+<p>Read it from the top. <code>git clone --branch jazzy</code> gets <code>ros2_kortex</code>, and the <code>for</code> loop runs <code>vcs import</code> on the three <code>.repos</code> files. <code>rosdep install --ignore-src --from-paths src -y -r</code> reads every <code>package.xml</code> in <code>src</code> and installs what is missing from <code>apt</code>: <code>--ignore-src</code> skips what is in the workspace itself, <code>-y</code> answers yes, and <code>-r</code> carries on if one package cannot be resolved. Last, <code>colcon build</code> with <code>-DCMAKE_BUILD_TYPE=Release</code> (compile with optimisation: robot code must be fast) and <code>--parallel-workers 6</code>, which builds at most 6 packages at a time. <strong>We did not run these steps in this lesson</strong>, since the workspace already exists: the full build takes about 3.5 minutes on a 32-core computer, and the image that results is 8.65 GB.</p>
+<div class="callout warn"><strong class="t">Why only 6 workers</strong>
+Compiling C++ uses a lot of memory, and colcon by default starts as many jobs as your computer has cores. On a computer with many cores but not much RAM, that can run out of memory and the build crashes or the machine freezes. If a build of the workspace fails mysteriously, run it again with a smaller number, such as <code>--parallel-workers 2</code>.</div>
+</li>
+
+<li>
+<h3>Change a package in your own overlay</h3>
+<p>You must not edit <code>/opt/kortex_ws</code>: it is read-only in the container, and in a local install a change would be hard to undo. Use the idea of A5: put a copy of one package in a workspace of your own, build it there, and source it <em>after</em> the Kinova workspace. ROS 2 then finds your copy first. Copy <code>kortex_description</code> (the model package) and build it with <code>--symlink-install</code> (A5):</p>
+<pre class="cmd"><code>mkdir -p code/b0-kortex/ws/src
+cp -r $KWS/src/ros2_kortex/kortex_description code/b0-kortex/ws/src/
+cd code/b0-kortex/ws
+colcon build --symlink-install
+source install/setup.bash</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; kortex_description
+Finished &lt;&lt;&lt; kortex_description [0.94s]
+
+Summary: 1 package finished [0.98s]</pre>
+<p>One package, about a second. This is why you never rebuild the whole workspace for a small change. Check which copy ROS 2 sees:</p>
+<pre class="cmd"><code>ros2 pkg prefix kortex_description
+echo $AMENT_PREFIX_PATH | tr : '\n' | head -3</code></pre>
+<pre class="out">/workspace/code/b0-kortex/ws/install/kortex_description
+/workspace/code/b0-kortex/ws/install/kortex_description
+/opt/kortex_ws/install/kortex_bringup
+/opt/kortex_ws/install/kinova_gen3_lite_moveit_config</pre>
+<p>Before you sourced the overlay, the same command printed <code>/opt/kortex_ws/install/kortex_description</code>. Now it prints your copy, and your copy is first in the search path. (The third line of the second command depends on the order in which packages were installed, and in a local install the paths start with your home folder.) Now a change you can see: the grid in RViz has squares of 1 m, and that is set in a file of this package, <code>rviz/view_robot.rviz</code>. Make them smaller, 0.25 m:</p>
+<pre class="cmd"><code>grep -n "Cell Size" src/kortex_description/rviz/view_robot.rviz
+sed -i 's/Cell Size: 1$/Cell Size: 0.25/' src/kortex_description/rviz/view_robot.rviz
+grep -n "Cell Size" src/kortex_description/rviz/view_robot.rviz</code></pre>
+<pre class="out">26:      Cell Size: 1
+26:      Cell Size: 0.25</pre>
+<p>No rebuild is needed: with <code>--symlink-install</code>, the installed file is a link to the one you just edited. Start the arm viewer of A6 and look at the grid (go back to the <code>ros2-tutorial</code> folder first):</p>
+<pre class="cmd"><code>cd ../../..
+ros2 launch kortex_description view_robot.launch.py gripper:=robotiq_2f_85</code></pre>
+<figure>
+<img src="img/b0-overlay-rviz.png" alt="RViz showing the Kinova arm with the gripper standing straight up over a grid of small squares." width="560">
+<figcaption>The arm, over a grid of 0.25 m squares (the squares were 1 m before the change). The title bar of the RViz window showed the file it loaded, <code>.../b0-kortex/ws/install/kortex_description/share/kortex_description/rviz/view_robot.rviz</code>: yours, not the original.</figcaption>
+</figure>
+<p>Close the windows with <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal. To get the original back, open a new terminal: it does not have your overlay sourced, so it sees <code>/opt/kortex_ws</code> again. The folder <code>code/b0-kortex/ws</code> is ignored by git; delete it when you no longer need it. This is the way to try changes to any Kinova package in the course.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li><code>echo $KWS</code> prints your workspace folder and <code>ls $KWS/src</code> lists twelve repositories, one of them <code>ros2_kortex</code>,</li>
+<li><code>colcon list</code> reports 76 packages, 7 of them from <code>ros2_kortex</code>,</li>
+<li>in the shell where you sourced the overlay, <code>ros2 pkg prefix kortex_description</code> points into <code>code/b0-kortex/ws</code>, and in a new terminal it points into the Kinova workspace,</li>
+<li>RViz shows a finer grid after your edit.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all four are true.</div>
+
+<h2>5. Exercise</h2>
+<p>Which package holds the Gazebo launch file <code>kortex_sim_control.launch.py</code>, and in which repository? Find it with one command, without looking in the lesson.</p>
+<details>
+<summary>Answer</summary>
+<pre class="cmd"><code>find $KWS/src -name kortex_sim_control.launch.py</code></pre>
+<pre class="out">/opt/kortex_ws/src/ros2_kortex/kortex_bringup/launch/kortex_sim_control.launch.py</pre>
+<p>It is in the package <code>kortex_bringup</code> (the folder after <code>ros2_kortex/</code>), in the repository <code>ros2_kortex</code>. The path tells you both: <code>src/<em>repository</em>/<em>package</em>/...</code>. (In a local install the path starts with <code>~/kortex_ws</code>.)</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li><strong>ros2_kortex</strong> (branch <code>jazzy</code>) has 7 packages: the model (<code>kortex_description</code>), the launch files and controller settings (<code>kortex_bringup</code>), the hardware driver and its API (<code>kortex_driver</code>, <code>kortex_api</code>) and three MoveIt configurations.</li>
+<li>It needs other source packages (ros2_control and controllers, a Robotiq driver, the Gazebo bridge), listed in <code>.repos</code> files. In all, 76 packages in 12 repositories.</li>
+<li>The build is <code>vcs import</code> (download), <code>rosdep install</code> (system packages), <code>colcon build</code> (compile, a few minutes). Limit <code>--parallel-workers</code> if memory runs out.</li>
+<li>Never edit the workspace itself. Copy a package into your own workspace, build it there (<code>--symlink-install</code>), source it last: it overrides the original, and a new terminal gets the original back.</li>
+<li><code>git log</code> in <code>src/ros2_kortex</code> tells you which version you have.</li>
+</ul>
+
+<nav class="pager">
+<a href="a8-cheatsheet.html"><small>Previous</small>A8 · ROS 2 cheatsheet</a>
+<span class="soon next"><small>Next</small>B1 · The arm (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

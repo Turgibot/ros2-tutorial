@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Planning and environment stage. The repo holds `PLAN.md` (course outline, decisions, and the environment test results), `README.md`, `docker/` (Dockerfile and run script) and `scripts/check_machine.sh`. Lessons A0 to A8 are written (`lessons/`, `code/01-nodes-topics/`, `code/02-messages-services/`, `code/03-actions/`, `code/04-parameters-launch/`, `code/05-packages/`, `code/06-frames/`). There is no lint or test suite.
+Planning and environment stage. The repo holds `PLAN.md` (course outline, decisions, and the environment test results), `README.md`, `docker/` (Dockerfile and run script) and `scripts/check_machine.sh`. Lessons A0 to A8 and B0 are written (`lessons/`, `code/01-nodes-topics/`, `code/02-messages-services/`, `code/03-actions/`, `code/04-parameters-launch/`, `code/05-packages/`, `code/06-frames/`, `code/b0-kortex/` (git-ignored overlay). There is no lint or test suite.
 
 ## What this is
 

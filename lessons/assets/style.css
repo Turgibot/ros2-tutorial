@@ -97,3 +97,6 @@ header.site .switches { margin-left: auto; display: flex; gap: .6rem; flex-wrap:
 header.site .langsw { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 header.site .langsw button { font: inherit; font-size: .85rem; padding: .2rem .7rem; border: 0; background: transparent; color: var(--fg); cursor: pointer; }
 header.site .langsw button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.byline { color: var(--muted); margin-top: -.5rem; }
+header.site > small { font-size: .85rem; color: var(--muted); margin-right: auto; }
+header.site > small a { color: inherit; font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }

@@ -46,9 +46,10 @@ Rules: one new idea at a time; nothing used before it is taught; every number/fo
 
 **Part B, the Kinova Gen3, milestone 1**
 - B0 Setup of the Kinova workspace: what `ros2_kortex` is, how the Dockerfile builds it (`vcs import`, `rosdep install`,
-  `colcon build`), the packages it contains, and how to rebuild one package. Known problems and fixes: `kortex_api`
-  Jazzy binaries are not released (build from source); protobuf mismatch with Gazebo (build in two steps); limit
-  `--parallel-workers` to avoid running out of memory. Checked with `ros2 launch kortex_description view_robot.launch.py`.
+  `colcon build`), the packages it contains, and how to rebuild one package. Not-released packages are built from source (`.repos` files); limit
+  `--parallel-workers` to avoid running out of memory (the old protobuf two-step build was not needed). The lesson only
+  explores the existing workspace and shows an overlay of `kortex_description` (the full build is NOT re-run in the lesson).
+  Written and run (B0).
   (Measured: the full workspace is 76 packages, about 3.5 minutes to compile on 32 cores; the image is 8.65 GB.)
 - B1 The arm: 7 joints, redundancy, joint limits, gripper; read the URDF (`dof:=7`, `gripper:=robotiq_2f_85`) and see it in RViz.
 - B2 Forward kinematics by hand for a 2-link case, then the Gen3 in TF; what "end effector pose" means.
