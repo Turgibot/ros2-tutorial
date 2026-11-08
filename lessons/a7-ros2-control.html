@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A7 · ros2_control</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A7 · ros2_control</h1>
+<p class="lead">Start the Kinova arm with fake hardware, look at the layers that make it move, and move it with a topic and with an action. This is the last piece of ROS 2 you need before the arm itself.</p>
+
+<h2>1. Goal</h2>
+<p>In A6 the arm in RViz was only a picture: sliders produced joint angles and TF drew them. A real arm has motors that must be <em>commanded</em> and sensors that must be <em>read</em>, at a steady rate, safely. ROS 2 has a framework for that, <strong>ros2_control</strong>, and the Kinova driver is built on it. The same framework works with <strong>mock</strong> (fake) hardware, which is how this course drives the arm without a real one. This lesson only looks at the framework and uses it from the command line. You write no code. In Part B your programs will do what you do by hand here.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>started the arm with the same launch file the real arm uses, with fake hardware,</li>
+<li>listed its <strong>controllers</strong>, <strong>hardware components</strong> and <strong>interfaces</strong>, and read the file that configures them,</li>
+<li>read the joint angles from <code>/joint_states</code> at 1000 Hz,</li>
+<li>moved the arm by publishing a <strong>trajectory</strong> to a topic, and by sending the same kind of goal to an <strong>action</strong> (A3) with feedback,</li>
+<li>switched from one controller to another and seen which one owns the joints.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>The layers</h3>
+<figure>
+<svg viewBox="0 0 860 346" role="img" aria-label="Two rows of boxes. Top row, commands flow right: your program, controller, command interface, hardware component, motors. Bottom row, state flows left: sensors, hardware component, state interface, broadcaster, your program." style="width:100%;height:auto;font-family:system-ui,sans-serif">
+<style>.t{font-size:15px;font-weight:600;fill:var(--fg)} .s{font-size:12px;fill:var(--muted)}</style>
+<defs>
+<marker id="c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+<marker id="s" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--ok-line)"/></marker>
+</defs>
+<rect x="170" y="10" width="170" height="326" rx="12" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="6 5"/>
+<text x="255" y="30" text-anchor="middle" class="s">controller manager</text>
+<text x="255" y="322" text-anchor="middle" class="s">read → update → write</text>
+<rect x="10" y="48" width="140" height="250" rx="8" fill="var(--out-bg)" stroke="var(--muted)" stroke-width="1.5"/><text x="80.0" y="167.5" text-anchor="middle" class="t">Your program</text><text x="80.0" y="186.5" text-anchor="middle" class="s">(Part B)</text>
+<rect x="185" y="48" width="140" height="84" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/><text x="255.0" y="75.0" text-anchor="middle" class="t">Controller</text><text x="255.0" y="94.0" text-anchor="middle" class="s">decides what</text><text x="255.0" y="113.0" text-anchor="middle" class="s">to command</text>
+<rect x="360" y="48" width="140" height="84" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/><text x="430.0" y="75.0" text-anchor="middle" class="t">Command</text><text x="430.0" y="94.0" text-anchor="middle" class="t">interface</text><text x="430.0" y="113.0" text-anchor="middle" class="s">joint_1/position</text>
+<rect x="535" y="48" width="140" height="250" rx="8" fill="var(--out-bg)" stroke="var(--muted)" stroke-width="1.5"/><text x="605.0" y="158.0" text-anchor="middle" class="t">Hardware</text><text x="605.0" y="177.0" text-anchor="middle" class="t">component</text><text x="605.0" y="196.0" text-anchor="middle" class="s">mock or real driver</text>
+<rect x="710" y="48" width="140" height="84" rx="8" fill="var(--warn)" stroke="var(--warn-line)" stroke-width="1.5"/><text x="780.0" y="94.0" text-anchor="middle" class="t">Motors</text>
+<rect x="185" y="214" width="140" height="84" rx="8" fill="var(--ok)" stroke="var(--ok-line)" stroke-width="1.5"/><text x="255.0" y="241.0" text-anchor="middle" class="t">Broadcaster</text><text x="255.0" y="260.0" text-anchor="middle" class="s">publishes</text><text x="255.0" y="279.0" text-anchor="middle" class="s">/joint_states</text>
+<rect x="360" y="214" width="140" height="84" rx="8" fill="var(--ok)" stroke="var(--ok-line)" stroke-width="1.5"/><text x="430.0" y="241.0" text-anchor="middle" class="t">State</text><text x="430.0" y="260.0" text-anchor="middle" class="t">interface</text><text x="430.0" y="279.0" text-anchor="middle" class="s">joint_1/position, …</text>
+<rect x="710" y="214" width="140" height="84" rx="8" fill="var(--warn)" stroke="var(--warn-line)" stroke-width="1.5"/><text x="780.0" y="260.0" text-anchor="middle" class="t">Sensors</text>
+<line x1="153" y1="90.0" x2="182" y2="90.0" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#c)"/>
+<line x1="182" y1="256.0" x2="153" y2="256.0" stroke="var(--ok-line)" stroke-width="2.5" marker-end="url(#s)"/>
+<line x1="328" y1="90.0" x2="357" y2="90.0" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#c)"/>
+<line x1="357" y1="256.0" x2="328" y2="256.0" stroke="var(--ok-line)" stroke-width="2.5" marker-end="url(#s)"/>
+<line x1="503" y1="90.0" x2="532" y2="90.0" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#c)"/>
+<line x1="532" y1="256.0" x2="503" y2="256.0" stroke="var(--ok-line)" stroke-width="2.5" marker-end="url(#s)"/>
+<line x1="678" y1="90.0" x2="707" y2="90.0" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#c)"/>
+<line x1="707" y1="256.0" x2="678" y2="256.0" stroke="var(--ok-line)" stroke-width="2.5" marker-end="url(#s)"/>
+</svg>
+<figcaption>The layers of ros2_control. <strong style="color:var(--accent)">Blue</strong>: commands go from your program down to the motors. <strong style="color:var(--ok-line)">Green</strong>: sensor values come back up, as <code>/joint_states</code>. The dashed box is what the controller manager runs, in a loop.</figcaption>
+</figure>
+<ul>
+<li>A <strong>hardware component</strong> is the part that talks to the actual device: it <em>reads</em> sensor values and <em>writes</em> commands. For the real arm it is a Kinova driver. For the digital twin it is <code>mock_components/GenericSystem</code>, which simply pretends: whatever position you command is the position it reports back.</li>
+<li>It offers <strong>interfaces</strong>, named <code>joint/kind</code>. A <strong>state interface</strong> is something you can read (<code>joint_1/position</code>, <code>joint_1/velocity</code>, <code>joint_1/effort</code>). A <strong>command interface</strong> is something you can set (<code>joint_1/position</code>, <code>joint_1/velocity</code>).</li>
+<li>A <strong>controller</strong> is a small plugin that uses interfaces. It reads some state interfaces, decides, and writes some command interfaces. A <em>joint trajectory controller</em> turns a list of waypoints with times into a smooth stream of position commands. A <em>broadcaster</em> only reads: the <code>joint_state_broadcaster</code> publishes the state interfaces as <code>/joint_states</code>, the topic A6 used.</li>
+<li>The <strong>controller manager</strong> is the node that runs everything in a loop, <code>update_rate</code> times a second: <em>read</em> the hardware, <em>update</em> every active controller, <em>write</em> the commands. The rate is 1000 Hz here, so one loop takes 1 ms.</li>
+<li>A command interface can be <strong>claimed</strong> by only one controller at a time. This is what stops two controllers from fighting over the same joint. Controllers can be <em>active</em> or <em>inactive</em>, and you switch between them while the arm runs.</li>
+</ul>
+<h3>Mock and real, one launch file</h3>
+<p>The Kinova launch file <code>gen3.launch.py</code> is the one you would use on the real arm. It has an argument <code>use_fake_hardware</code>: when <code>true</code>, it loads the mock component in place of the Kinova driver. Everything above the hardware (controllers, topics, actions, RViz, and later MoveIt) is identical. That is why a program that works on the twin works on the real arm. The launch file needs a <code>robot_ip</code> argument for the real arm; with fake hardware nothing connects to it, so any text will do.</p>
+
+<h2>3. Do it</h2>
+<p>All commands run in a <span class="env docker"><strong>container shell</strong></span><span class="env local">terminal set up for ROS 2</span> (A0, step 5), in the <code>ros2-tutorial</code> folder. You need two terminals, T1 and T2. There is no code to write, so the Python / C++ switch has no effect here.</p>
+
+<ol class="steps">
+
+<li>
+<h3>Start the arm with fake hardware</h3>
+<p class="env docker"><span class="where host">host</span> <strong>T1</strong>: open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> <strong>T1</strong>: open a terminal in the <code>ros2-tutorial</code> folder.</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>ros2 launch kortex_bringup gen3.launch.py robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true gripper:=robotiq_2f_85</code></pre>
+<p>Lots of log lines scroll by, and RViz opens with the arm standing straight up. Near the end you should see the broadcaster start:</p>
+<pre class="out">[ros2_control_node-1] [INFO] [1794059325.702188617] [controller_manager]: Activating controllers: [ joint_state_broadcaster ]
+[ros2_control_node-1] [INFO] [1794059325.702576566] [controller_manager]: Successfully switched controllers!
+[spawner-3] [INFO] [1794059325.704025324] [spawner_joint_state_broadcaster]: Configured and activated joint_state_broadcaster</pre>
+<p>Leave it running. <code>gripper:=robotiq_2f_85</code> adds the gripper, as in A6.</p>
+<p class="env docker"><span class="where host">host</span> <strong>T2</strong>: open a second terminal and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> <strong>T2</strong>: open a second terminal in the <code>ros2-tutorial</code> folder.</p>
+</li>
+
+<li>
+<h3>Nodes and controllers</h3>
+<p><span class="where box">container</span> In T2:</p>
+<pre class="cmd"><code>ros2 node list
+ros2 control list_controllers</code></pre>
+<pre class="out">/controller_manager
+/joint_group_velocity_controller
+/joint_state_broadcaster
+/joint_trajectory_controller
+/kortexmultiinterfacehardware
+/robot_state_publisher
+/robotiq_gripper_controller
+/robotiqgripperhardwareinterface
+/twist_controller
+
+twist_controller                picknik_twist_controller/PicknikTwistController             inactive
+joint_trajectory_controller     joint_trajectory_controller/JointTrajectoryController       active
+robotiq_gripper_controller      parallel_gripper_action_controller/GripperActionController  active
+joint_state_broadcaster         joint_state_broadcaster/JointStateBroadcaster               active
+joint_group_velocity_controller velocity_controllers/JointGroupVelocityController           inactive</pre>
+<p>(The blank line is only here to separate the two commands. The order of the nodes and controllers may differ.) Every controller is a node. The list says, for each one, its <strong>type</strong> (the plugin) and its <strong>state</strong>. Five are loaded: three are <strong>active</strong> and two are <strong>inactive</strong>:</p>
+<table>
+<tr><th>Controller</th><th>What it does</th><th>State</th></tr>
+<tr><td><code>joint_state_broadcaster</code></td><td>publishes <code>/joint_states</code></td><td>active</td></tr>
+<tr><td><code>joint_trajectory_controller</code></td><td>moves the 7 joints along a trajectory (position commands)</td><td>active</td></tr>
+<tr><td><code>robotiq_gripper_controller</code></td><td>opens and closes the gripper</td><td>active</td></tr>
+<tr><td><code>joint_group_velocity_controller</code></td><td>takes one velocity per joint</td><td>inactive</td></tr>
+<tr><td><code>twist_controller</code></td><td>takes a velocity of the hand in space (used for servoing)</td><td>inactive</td></tr>
+</table>
+<p>Two entries in the node list are not controllers: <code>/kortexmultiinterfacehardware</code> and <code>/robotiqgripperhardwareinterface</code>. Each is a <strong>hardware component</strong>, the layer below the controllers (see the diagram above): the first stands for the arm's seven joints, the second for the gripper. They are named after the Kinova driver and the Robotiq gripper driver they stand in for, even though here both are fakes. Step 3 shows them.</p>
+</li>
+
+<li>
+<h3>Hardware and interfaces</h3>
+<pre class="cmd"><code>ros2 control list_hardware_components</code></pre>
+<p>The output is long; these are the lines that matter, for the arm component (the other one is the gripper):</p>
+<pre class="out">Hardware Component 2
+	name: KortexMultiInterfaceHardware
+	type: system
+	plugin name: mock_components/GenericSystem
+	state: id=3 label=active
+	read/write rate: 1000 Hz
+	command interfaces
+		joint_7/position [available] [claimed]
+		joint_5/velocity [available] [unclaimed]
+		joint_5/position [available] [claimed]
+		joint_1/position [available] [claimed]
+		joint_1/velocity [available] [unclaimed]
+		...</pre>
+<p>This is the layer of the picture above. The name is that of the Kinova driver, but the <strong>plugin</strong> is <code>mock_components/GenericSystem</code>: the fake one. The arm component offers a <code>position</code> and a <code>velocity</code> command interface for each joint (the lines are not in order). <code>[claimed]</code> means a controller is using it: the trajectory controller has claimed every <code>position</code> interface, and the <code>velocity</code> ones are <code>[unclaimed]</code> because the velocity controller is inactive. Step 8 changes that. <code>ros2 control list_hardware_interfaces</code> lists all command and state interfaces in one go, and <code>ros2 control list_controllers -v</code> shows per controller which ones it claims.</p>
+</li>
+
+<li>
+<h3>The configuration file</h3>
+<p>Which controllers exist, and how each one is set, is in a YAML file, in the same format as the parameter files of A4 (the controllers are nodes, and these are their parameters). Print the one for the 7-DoF arm:</p>
+<pre class="cmd"><code>cat $(ros2 pkg prefix --share kortex_description)/arms/gen3/7dof/config/ros2_controllers.yaml</code></pre>
+<p>The start of it:</p>
+<pre class="out">controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    ...
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      ...
+      - joint_7
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0</pre>
+<p>The top block is the controller manager: the loop rate, and the name and <code>type</code> of each controller it can load. Then each controller has its own block. For the trajectory controller: which <code>joints</code> it moves, which interfaces it commands (<code>position</code>) and reads, and how often it publishes its state (100 Hz) and its action feedback (20 Hz; you will see that in step 7). This is the only file that says <em>how</em> the arm is controlled.</p>
+</li>
+
+<li>
+<h3>Read the joint angles</h3>
+<pre class="cmd"><code>ros2 topic echo /joint_states --once --field position
+ros2 topic hz /joint_states</code></pre>
+<pre class="out">array('d', [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.7929, 0.7929, 0.7929, 0.7929, -0.7929, -0.7929])
+---
+average rate: 1000.093
+	min: 0.001s max: 0.001s std dev: 0.00001s window: 1002
+average rate: 1000.047
+	min: 0.001s max: 0.001s std dev: 0.00001s window: 2003</pre>
+<p>The first seven numbers are the arm joints, <code>joint_1</code> to <code>joint_7</code>, in radians; the other six belong to the joints of the gripper (<code>ros2 topic echo /joint_states --once</code> shows the names). Stop <code>hz</code> with <kbd>Ctrl</kbd>+<kbd>C</kbd>. The topic is published at <strong>1000 Hz</strong>, once per control loop. (<code>echo</code> may print a "message was lost" warning: a terminal cannot keep up with 1000 messages a second. The robot does not care.) <code>robot_state_publisher</code>, from A6, turns these angles into the frames you saw.</p>
+</li>
+
+<li>
+<h3>Move the arm: a trajectory on a topic</h3>
+<p>The trajectory controller listens on <code>/joint_trajectory_controller/joint_trajectory</code>, type <code>trajectory_msgs/msg/JointTrajectory</code>. A trajectory is a list of <strong>points</strong>. Each point has <code>positions</code> (one angle per joint, in the order of <code>joint_names</code>) and a <code>time_from_start</code>: when the arm should be there. Send one point, 4 seconds away:</p>
+<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 4}}]}"</pre>
+<p>The arm in RViz moves smoothly to a bent pose and stops after four seconds. Look at the angles, and then at the hand with the tool of A6, once the move is over:</p>
+<pre class="cmd"><code>ros2 topic echo /joint_states --once --field position
+ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">array('d', [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0, -0.7929, 0.7929, 0.7929, 0.7929, -0.7929, -0.7929])
+---
+At time ...
+- Translation: [0.033, -0.046, 1.097]</pre>
+<p>(Stop <code>tf2_echo</code> with <kbd>Ctrl</kbd>+<kbd>C</kbd>.) The joint angles are exactly the ones commanded, as the fake hardware promises, and the hand is no longer at <em>z = 1.187</em> as in A6, but at 1.097: you moved it. The whole chain of this course is in this one step: a command to a controller, the mock hardware, <code>/joint_states</code>, <code>robot_state_publisher</code>, TF, RViz. The picture is what you should see:</p>
+<figure>
+<img src="img/a7-arm-moved.png" alt="RViz showing the Kinova arm with the gripper, bent forward over a grid after the trajectory command: the elbows are bent and the hand points down." width="628">
+<figcaption>The arm after the trajectory above. (The fake arm lives in the same RViz as in A6, started this time by <code>gen3.launch.py</code>.)</figcaption>
+</figure>
+<div class="callout"><strong class="t">Careful with real arms</strong>
+A topic has no answer: if the angles are wrong or too far away, the controller simply tries. On the real arm you would never send a big jump like this without checking. That is one reason to use an action, next, and later MoveIt, which plans a path that avoids collisions.</div>
+</li>
+
+<li>
+<h3>Move the arm: the same, as an action</h3>
+<p>The same controller also offers an <strong>action</strong> (A3): <code>/joint_trajectory_controller/follow_joint_trajectory</code>, type <code>control_msgs/action/FollowJointTrajectory</code>. Its goal contains the same trajectory. You get an accepted/rejected answer, <strong>feedback</strong> while it moves and a <strong>result</strong> when it ends. Look at it, then send a goal (send the arm back to zero first, if you want to see it move, with the same topic command and <code>positions</code> all <code>0.0</code>):</p>
+<pre class="cmd"><code>ros2 action info /joint_trajectory_controller/follow_joint_trajectory
+ros2 action send_goal --feedback /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 3}}]}}"</pre>
+<pre class="out">Action: /joint_trajectory_controller/follow_joint_trajectory
+Action clients: 0
+Action servers: 1
+    /joint_trajectory_controller
+...
+Goal accepted with ID: a4304bddd1a64d52be92d6533a1efff6
+
+Feedback:
+    header:
+  stamp:
+    sec: 1794059485
+    nanosec: 281694761
+  frame_id: ''
+joint_names:
+- joint_1
+...
+desired:
+  positions:
+  - 0.008166102666666666
+  - 0.008166102666666666
+  - 0.0
+  - -0.016332205333333332
+  ...
+  velocities:
+  - 0.16666666666666666
+  ...
+(many more feedback messages)
+Result:
+    error_code: 0
+error_string: Goal successfully reached!
+
+Goal finished with status: SUCCEEDED</pre>
+<p>(The goal is printed back first; we cut it, and the feedback, to the parts that matter. The goal ID is different every time.) The feedback comes 20 times a second (we counted 60 messages for a 3 s goal, which is the <code>action_monitor_rate</code> of 20 Hz of step 4) and compares the <code>desired</code> pose with the <code>actual</code> one (and their <code>error</code>). At the start, joint_1 is asked to be at 0.008 rad moving at 0.167 rad/s: that is 0.5 rad in 3 s, <em>0.5 / 3 = 0.167</em>. The result says <code>error_code: 0</code> and <code>SUCCEEDED</code>. A program can wait for it, as in A3, and then do the next thing. This is what MoveIt will use in Part B.</p>
+</li>
+
+<li>
+<h3>Switch controllers</h3>
+<p>Look at who owns <code>joint_1</code> now:</p>
+<pre class="cmd"><code>ros2 control list_hardware_interfaces | grep -E "joint_1/(position|velocity) "</code></pre>
+<pre class="out">	joint_1/position [available] [claimed]
+	joint_1/velocity [available] [unclaimed]</pre>
+<p>(This command prints the state interfaces below the command interfaces too, which our <code>grep</code> hides: they have no <code>[claimed]</code> mark, as a state can be read by anyone.) Now stop the trajectory controller and start the velocity controller, and look again:</p>
+<pre class="cmd"><code>ros2 control switch_controllers --deactivate joint_trajectory_controller --activate joint_group_velocity_controller
+ros2 control list_hardware_interfaces | grep -E "joint_1/(position|velocity) "</code></pre>
+<pre class="out">Successfully switched controllers!
+Deactivated controllers: [ joint_trajectory_controller ]
+Activated controllers: [ joint_group_velocity_controller ]
+	joint_1/position [available] [unclaimed]
+	joint_1/velocity [available] [claimed]</pre>
+<p>The ownership moved: <code>joint_1</code> is now commanded in velocity, by another controller, and the trajectory controller is no longer in charge of the arm. One owner per command interface. (The mock arm of this course does not move under the velocity controller, so we only look at who owns what. The switching is the same on the real arm.) Switch back, so that the next lesson finds the arm as it started:</p>
+<pre class="cmd"><code>ros2 control switch_controllers --deactivate joint_group_velocity_controller --activate joint_trajectory_controller</code></pre>
+<pre class="out">Successfully switched controllers!
+Deactivated controllers: [ joint_group_velocity_controller ]
+Activated controllers: [ joint_trajectory_controller ]</pre>
+<p>Stop the launch in T1 with <kbd>Ctrl</kbd>+<kbd>C</kbd> when you are done.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li><code>ros2 control list_controllers</code> shows <code>joint_trajectory_controller</code> and <code>joint_state_broadcaster</code> as <code>active</code>,</li>
+<li><code>list_hardware_components</code> shows <code>mock_components/GenericSystem</code>,</li>
+<li>the arm moves in RViz after your topic command, and <code>/joint_states</code> shows the angles you sent,</li>
+<li>the action ends with <code>SUCCEEDED</code>.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all four are true.</div>
+
+<h2>5. Exercise</h2>
+<p>Send the arm back to the straight-up pose, all seven joints at 0, in 2 seconds, with a topic command. Before you run it, use A6 to predict where the hand will be. Then check with <code>tf2_echo base_link end_effector_link</code>.</p>
+<details>
+<summary>Answer</summary>
+<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0, 0, 0, 0, 0, 0, 0], time_from_start: {sec: 2}}]}"
+ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">- Translation: [-0.000, -0.025, 1.187]</pre>
+<p>All joints at zero is the pose of A6: the hand at <em>(0, −0.025, 1.187)</em> in <code>base_link</code>, straight up. (We ran this after the move of step 6, and waited 3 s before asking.)</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li><strong>ros2_control</strong> separates <em>hardware components</em> (read sensors, write commands) from <em>controllers</em> (decide commands), run by the <em>controller manager</em> at <code>update_rate</code> (1000 Hz).</li>
+<li>Hardware offers <strong>state interfaces</strong> (read) and <strong>command interfaces</strong> (write), named <code>joint/kind</code>. A command interface is claimed by one active controller at a time.</li>
+<li><code>joint_state_broadcaster</code> publishes <code>/joint_states</code>; <code>joint_trajectory_controller</code> moves the joints from a topic (<code>JointTrajectory</code>) or an action (<code>FollowJointTrajectory</code>, with feedback and result).</li>
+<li><code>use_fake_hardware:=true</code> swaps the Kinova driver for <code>mock_components/GenericSystem</code>. Everything above it is the same as on the real arm.</li>
+<li><code>ros2 control list_controllers | list_hardware_components | list_hardware_interfaces | switch_controllers</code> inspect and change it; a YAML file (<code>ros2_controllers.yaml</code>) configures the controllers.</li>
+</ul>
+
+<nav class="pager">
+<a href="a6-frames-tf2.html"><small>Previous</small>A6 · Frames and TF2</a>
+<a class="next" href="a8-cheatsheet.html"><small>Next</small>A8 · ROS 2 cheatsheet</a>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

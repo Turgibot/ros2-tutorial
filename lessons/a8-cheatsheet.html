@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A8 · ROS 2 cheatsheet</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+.dl { display: flex; gap: 10px; flex-wrap: wrap; margin: 1rem 0 1.4rem; }
+.dl a { display: inline-block; padding: 7px 16px; border: 1px solid var(--accent); border-radius: 8px;
+  color: var(--accent); text-decoration: none; font-weight: 600; background: var(--accent-soft); }
+.dl a:hover { background: var(--accent); color: var(--bg); }
+.dl small { font-weight: 400; opacity: .8; }
+.cs h2 { display: flex; align-items: baseline; gap: 10px; }
+.cs .lid { font-size: .75rem; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: var(--accent-soft);
+  color: var(--accent); text-decoration: none; }
+table.cs-t { width: 100%; border-collapse: collapse; }
+table.cs-t td { vertical-align: top; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); }
+table.cs-t td:first-child { width: 58%; }
+table.cs-t pre.cmd { margin: 0; }
+@media (max-width: 700px) { table.cs-t, table.cs-t tbody, table.cs-t tr, table.cs-t td { display: block; width: 100% !important; }
+  table.cs-t td { border: 0; padding: 0; } table.cs-t tr { border-top: 1px solid var(--line); padding: 8px 0; } }
+</style>
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><span>Part A · ROS 2 basics</span></header>
+<main>
+
+<h1>A8 · ROS 2 cheatsheet</h1>
+<p class="lead">All the commands of Part A on one page, grouped as in the lessons. Keep it open next to your terminal.</p>
+<div class="dl">
+<a href="downloads/ros2-cheatsheet.pdf" download>PDF <small>(print or read)</small></a>
+<a href="downloads/ros2-cheatsheet.md" download>Markdown <small>(.md)</small></a>
+<a href="downloads/ros2-cheatsheet.txt" download>Plain text <small>(.txt)</small></a>
+</div>
+<p>Commands from lessons A0 to A7 (ROS 2 Jazzy). Words in &lt;angle brackets&gt; are placeholders: replace them, without the brackets. Text in quotes like "{data: hello}" is YAML: field names and their values, as the message, request or goal defines them (ros2 interface show &lt;type&gt; lists the fields). Click <strong>Copy</strong> on a command to copy it. The tag next to each heading is the lesson that teaches it. Everything here works the same in the Docker container and in a local install.</p>
+
+<section class="cs" id="terminal-and-environment"><h2>Terminal and environment <a class="lid" href="a0-environment.html">A0</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>source /opt/ros/jazzy/setup.bash</code></pre></td><td>Make ROS 2 available in this terminal (already done in the course container)</td></tr>
+<tr><td><pre class="cmd"><code>source install/setup.bash</code></pre></td><td>Make your own built workspace available (run in the workspace folder, after a build)</td></tr>
+<tr><td><pre class="cmd"><code>echo $ROS_DOMAIN_ID</code></pre></td><td>Show the domain; programs only see each other in the same domain (default 0)</td></tr>
+<tr><td><pre class="cmd"><code>export ROS_DOMAIN_ID=5</code></pre></td><td>Use domain 5 in this terminal (0 to 101)</td></tr>
+<tr><td><kbd>Ctrl+C</kbd></td><td>Stop the program running in the terminal. (Ctrl+Z only suspends it: do not use it.)</td></tr>
+<tr><td><kbd>Tab</kbd></td><td>Complete a command, a topic name or a type. Press twice to list the choices</td></tr>
+</table></section>
+<section class="cs" id="nodes"><h2>Nodes <a class="lid" href="a1-nodes-topics.html">A1</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 run &lt;package&gt; &lt;executable&gt;</code></pre></td><td>Start a program (a node) from a package</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run &lt;package&gt; &lt;executable&gt; --ros-args -r __node:=&lt;new_name&gt;</code></pre></td><td>Start it under another node name (run two copies)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 node list</code></pre></td><td>List the running nodes</td></tr>
+<tr><td><pre class="cmd"><code>ros2 node info /&lt;node&gt;</code></pre></td><td>Show a node's topics, services, actions and parameters</td></tr>
+</table></section>
+<section class="cs" id="topics"><h2>Topics <a class="lid" href="a1-nodes-topics.html">A1</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 topic list</code></pre></td><td>List the topics (add -t to show their types)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic type /&lt;topic&gt;</code></pre></td><td>Show a topic's message type</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic info /&lt;topic&gt;</code></pre></td><td>Type, publishers and subscribers (add -v for their QoS settings)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic echo /&lt;topic&gt;</code></pre></td><td>Print the messages as they arrive</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic echo /&lt;topic&gt; --once</code></pre></td><td>Print one message and stop</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic echo /&lt;topic&gt; --field &lt;field&gt;</code></pre></td><td>Print only one field of each message</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic hz /&lt;topic&gt;</code></pre></td><td>Measure how many messages arrive per second</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic pub --once /chatter std_msgs/msg/String "{data: hello}"</code></pre></td><td>Publish one message. The YAML in quotes is field: value; this type has one field, data (see: ros2 interface show std_msgs/msg/String)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic pub -r 1 /chatter std_msgs/msg/String "{data: hello}"</code></pre></td><td>The same, once per second until Ctrl+C</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic list --include-hidden-topics</code></pre></td><td>Also list hidden topics (the ones an action creates)</td></tr>
+</table></section>
+<section class="cs" id="messages-services-and-interfaces"><h2>Messages, services and interfaces <a class="lid" href="a2-messages-services.html">A2</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 interface list</code></pre></td><td>List every message, service and action type</td></tr>
+<tr><td><pre class="cmd"><code>ros2 interface package &lt;package&gt;</code></pre></td><td>List the types a package defines</td></tr>
+<tr><td><pre class="cmd"><code>ros2 interface show &lt;package&gt;/msg/&lt;Type&gt;</code></pre></td><td>Show the fields of a message (use /srv/ or /action/ for the others)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 service list</code></pre></td><td>List the services (add -t to show their types)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 service type /&lt;service&gt;</code></pre></td><td>Show a service's type</td></tr>
+<tr><td><pre class="cmd"><code>ros2 service call /add_two_ints example_interfaces/srv/AddTwoInts "{a: 2, b: 3}"</code></pre></td><td>Call a service. The YAML is the request: its fields (here a and b) are listed above the --- line of ros2 interface show</td></tr>
+<tr><td><pre class="cmd"><code>ros2 service list --include-hidden-services</code></pre></td><td>Also list hidden services (the ones an action creates)</td></tr>
+</table></section>
+<section class="cs" id="actions"><h2>Actions <a class="lid" href="a3-actions.html">A3</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 action list</code></pre></td><td>List the actions (add -t to show their types)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 action info /&lt;action&gt;</code></pre></td><td>Show an action's type, servers and clients</td></tr>
+<tr><td><pre class="cmd"><code>ros2 action send_goal /&lt;action&gt; &lt;type&gt; "{&lt;field&gt;: &lt;value&gt;}"</code></pre></td><td>Send a goal and wait for the result. The YAML is the goal: its fields are above the first --- line of ros2 interface show &lt;type&gt;</td></tr>
+<tr><td><pre class="cmd"><code>ros2 action send_goal --feedback /&lt;action&gt; &lt;type&gt; "{&lt;field&gt;: &lt;value&gt;}"</code></pre></td><td>Same, and print the feedback while it runs</td></tr>
+</table></section>
+<section class="cs" id="parameters"><h2>Parameters <a class="lid" href="a4-parameters-launch.html">A4</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 param list</code></pre></td><td>List the parameters of every node (or: ros2 param list /&lt;node&gt;)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 param get /&lt;node&gt; &lt;name&gt;</code></pre></td><td>Read a parameter</td></tr>
+<tr><td><pre class="cmd"><code>ros2 param describe /&lt;node&gt; &lt;name&gt;</code></pre></td><td>Show its type, description and limits</td></tr>
+<tr><td><pre class="cmd"><code>ros2 param set /&lt;node&gt; &lt;name&gt; &lt;value&gt;</code></pre></td><td>Change it while the node runs (lost when the node stops)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 param dump /&lt;node&gt;</code></pre></td><td>Print all of a node's parameters as YAML</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run &lt;package&gt; &lt;executable&gt; --ros-args -p &lt;name&gt;:=&lt;value&gt;</code></pre></td><td>Set a parameter when the node starts</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run &lt;package&gt; &lt;executable&gt; --ros-args --params-file &lt;file.yaml&gt;</code></pre></td><td>Set parameters from a YAML file (top-level key = node name)</td></tr>
+</table></section>
+<section class="cs" id="launch-files"><h2>Launch files <a class="lid" href="a4-parameters-launch.html">A4</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 launch &lt;package&gt; &lt;file.launch.py&gt;</code></pre></td><td>Start everything a launch file describes</td></tr>
+<tr><td><pre class="cmd"><code>ros2 launch &lt;package&gt; &lt;file.launch.py&gt; &lt;arg&gt;:=&lt;value&gt;</code></pre></td><td>Give the launch file an argument</td></tr>
+<tr><td><pre class="cmd"><code>ros2 launch &lt;package&gt; &lt;file.launch.py&gt; --show-args</code></pre></td><td>List its arguments and their defaults, without starting anything</td></tr>
+</table></section>
+<section class="cs" id="packages-and-workspaces"><h2>Packages and workspaces <a class="lid" href="a5-packages-workspaces.html">A5</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 pkg list</code></pre></td><td>List the installed packages</td></tr>
+<tr><td><pre class="cmd"><code>ros2 pkg prefix &lt;package&gt;</code></pre></td><td>Show where a package is installed (add --share for its share folder)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 pkg executables &lt;package&gt;</code></pre></td><td>List the programs a package offers to ros2 run</td></tr>
+<tr><td><pre class="cmd"><code>ros2 pkg create --build-type ament_python --node-name &lt;node&gt; &lt;package&gt;</code></pre></td><td>New Python package with one program (ament_cmake for C++)</td></tr>
+<tr><td><pre class="cmd"><code>colcon build</code></pre></td><td>Build every package under src/ (run in the workspace folder)</td></tr>
+<tr><td><pre class="cmd"><code>colcon build --packages-select &lt;package&gt;</code></pre></td><td>Build only one package</td></tr>
+<tr><td><pre class="cmd"><code>colcon build --symlink-install</code></pre></td><td>Link Python, launch and YAML files instead of copying (edit without rebuilding)</td></tr>
+<tr><td><pre class="cmd"><code>colcon list</code></pre></td><td>List the packages colcon found</td></tr>
+<tr><td><pre class="cmd"><code>rosdep install --from-paths src --ignore-src -y</code></pre></td><td>Install the system packages the workspace needs</td></tr>
+<tr><td><pre class="cmd"><code>echo $AMENT_PREFIX_PATH | tr : '\n'</code></pre></td><td>Show the workspaces in the search order, front first</td></tr>
+</table></section>
+<section class="cs" id="frames-and-tf2"><h2>Frames and TF2 <a class="lid" href="a6-frames-tf2.html">A6</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 run tf2_ros tf2_echo &lt;from_frame&gt; &lt;to_frame&gt;</code></pre></td><td>Print where &lt;to_frame&gt; is, as seen from &lt;from_frame&gt;</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run tf2_ros static_transform_publisher --x 0.1 --frame-id &lt;parent&gt; --child-frame-id &lt;child&gt;</code></pre></td><td>Publish a fixed frame (also --y --z --roll --pitch --yaw)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run tf2_tools view_frames</code></pre></td><td>Draw the frame tree into frames_&lt;date&gt;.pdf</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run tf2_ros tf2_monitor</code></pre></td><td>Show, per frame, how long its transforms take to arrive</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic echo /tf_static --once</code></pre></td><td>Look at the transform messages of fixed frames</td></tr>
+<tr><td><pre class="cmd"><code>ros2 run rviz2 rviz2 -d &lt;file.rviz&gt;</code></pre></td><td>Open RViz with a saved configuration</td></tr>
+</table></section>
+<section class="cs" id="ros2_control"><h2>ros2_control <a class="lid" href="a7-ros2-control.html">A7</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 control list_controllers</code></pre></td><td>List the controllers and whether each is active (add -v for the interfaces each claims)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 control list_hardware_components</code></pre></td><td>List the hardware components (mock or real) and their interfaces</td></tr>
+<tr><td><pre class="cmd"><code>ros2 control list_hardware_interfaces</code></pre></td><td>List every command and state interface, and which are claimed</td></tr>
+<tr><td><pre class="cmd"><code>ros2 control switch_controllers --deactivate &lt;controller&gt; --activate &lt;controller&gt;</code></pre></td><td>Hand the joints from one controller to another</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic echo /joint_states --once</code></pre></td><td>Read the joint names, angles, velocities and efforts</td></tr>
+</table></section>
+<section class="cs" id="the-kinova-arm"><h2>The Kinova arm <a class="lid" href="a7-ros2-control.html">A6, A7</a></h2>
+<table class="cs-t">
+<tr><td><pre class="cmd"><code>ros2 launch kortex_description view_robot.launch.py gripper:=robotiq_2f_85</code></pre></td><td>The arm in RViz with joint sliders (no controllers)</td></tr>
+<tr><td><pre class="cmd"><code>ros2 launch kortex_bringup gen3.launch.py robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true gripper:=robotiq_2f_85</code></pre></td><td>The arm with controllers and fake hardware: the same launch file as the real arm</td></tr>
+<tr><td><pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0, 0, 0, 0, 0, 0, 0], time_from_start: {sec: 2}}]}"</code></pre></td><td>Move all seven joints to zero in 2 seconds</td></tr>
+</table></section>
+
+<nav class="pager">
+<a href="a7-ros2-control.html"><small>Previous</small>A7 · ros2_control</a>
+<span class="soon next"><small>Next</small>B0 · Kinova workspace (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

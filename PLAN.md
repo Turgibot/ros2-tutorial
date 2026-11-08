@@ -41,7 +41,8 @@ Rules: one new idea at a time; nothing used before it is taught; every number/fo
 - A4 Parameters and launch files.
 - A5 Packages and workspaces: `package.xml`, `CMakeLists.txt`/`setup.py`, `colcon build`, overlays, sourcing order.
 - A6 Frames and TF2: what a coordinate frame is, transforms and the frame tree, `/tf` and `/tf_static`, broadcaster and listener nodes (Python and C++), `tf2_echo`, `view_frames`, the RViz TF display, and the arm's frames (`base_link` to `end_effector_link`) from `robot_state_publisher`. Written and run (A6).
-- A7 ros2_control in one lesson: controllers, joint states, command interfaces (concept only).
+- A7 ros2_control in one lesson: hardware components, interfaces, controllers, controller manager; the arm started with `gen3.launch.py use_fake_hardware:=true`; move it with a `JointTrajectory` topic and the `FollowJointTrajectory` action; switch controllers. Command line only, no code. Written and run (A7).
+- A8 ROS 2 cheatsheet: every command of A0 to A7 in one reference page, with downloads (PDF, Markdown, plain text) built by `scripts/build_cheatsheet.py` from one table. Not a lesson (no Goal/Exercise).
 
 **Part B, the Kinova Gen3, milestone 1**
 - B0 Setup of the Kinova workspace: what `ros2_kortex` is, how the Dockerfile builds it (`vcs import`, `rosdep install`,
