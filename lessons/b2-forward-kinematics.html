@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B2 · Forward kinematics</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part B · The Kinova Gen3</span></header>
+<main>
+
+<h1>B2 · Forward kinematics</h1>
+<p class="lead">From joint angles to the position of the hand: first by hand for a flat arm with two links, then in a small program for the Gen3, checked against what TF reports for the real (fake) arm.</p>
+
+<h2>1. Goal</h2>
+<p>The arm is controlled through its joint angles (A7, B1), but you care about where the <em>hand</em> is. Computing the hand's pose from the joint angles is called <strong>forward kinematics</strong> (FK). You have already used its result: <code>tf2_echo base_link end_effector_link</code> (A6, A7) gave the hand pose, and <code>robot_state_publisher</code> computes it all the time. In this lesson you compute it yourself, so that "the hand pose" stops being a black box.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>worked out the hand position of a flat two-link arm with a calculator, and checked it with a program,</li>
+<li>seen two different arm shapes that put the hand at the same place (a first look at why B3 is needed),</li>
+<li>seen that the pose of a frame is a 4×4 matrix, and that a chain of joints is a product of such matrices,</li>
+<li>run a program that does this for all seven joints of the Gen3, and shown that it gives the same numbers as <code>tf2_echo</code> on the arm.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>Kinematics and forward kinematics</h3>
+<p><strong>Kinematics</strong> is the geometry of motion: where things are, ignoring forces and masses. <strong>Forward</strong> kinematics goes from the <em>joint angles</em> to the <em>pose of the hand</em>. (The opposite, from a wanted hand pose to joint angles, is <strong>inverse</strong> kinematics: B3.) The hand is also called the <strong>end effector</strong>: the last frame of the chain, the one that does the work. On the Gen3 it is the frame <code>end_effector_link</code> (B1).</p>
+
+<h3>A flat arm with two links</h3>
+<p>Start with the simplest case, in a plane (x to the right, y up). The base is at the origin. Link 1 has length <em>l1</em> and is turned by the angle <em>θ1</em> (theta one) from the x axis. At its tip is the elbow joint, and link 2 of length <em>l2</em> is turned by <em>θ2</em> <em>relative to link 1</em>.</p>
+<svg viewBox="0 0 520 300" role="img" aria-label="A flat arm: link 1 of length l1 at angle theta1 from the x axis, link 2 of length l2 at angle theta2 from link 1, hand at the end" style="max-width:520px;width:100%;height:auto;font:14px sans-serif">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+  <line x1="40" y1="250" x2="300" y2="250" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/>
+  <text x="304" y="254" fill="var(--muted)">x</text>
+  <line x1="40" y1="250" x2="40" y2="20" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah)"/>
+  <text x="46" y="24" fill="var(--muted)">y</text>
+  <!-- link 1: from (40,250) to elbow (190,170) -->
+  <line x1="40" y1="250" x2="190" y2="170" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"/>
+  <!-- extension of link 1 (dashed) -->
+  <line x1="190" y1="170" x2="248" y2="140" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <!-- link 2: from elbow to hand (330,95) -->
+  <line x1="190" y1="170" x2="222" y2="78" stroke="var(--ok-line)" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="40" cy="250" r="7" fill="var(--fg)"/>
+  <circle cx="190" cy="170" r="7" fill="var(--fg)"/>
+  <circle cx="222" cy="78" r="7" fill="var(--warn-line)"/>
+  <path d="M 90 250 A 50 50 0 0 0 83 224" fill="none" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="96" y="243" fill="var(--fg)">θ1</text>
+  <path d="M 228 152 A 40 40 0 0 0 204 133" fill="none" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="234" y="140" fill="var(--fg)">θ2</text>
+  <text x="95" y="196" fill="var(--accent)">l1</text>
+  <text x="168" y="118" fill="var(--ok-line)">l2</text>
+  <text x="234" y="82" fill="var(--warn-line)">hand</text>
+  <text x="198" y="192" fill="var(--fg)">elbow</text>
+</svg>
+<p>The dashed line continues link 1. Link 2 is turned by θ2 away from it. Because link 2 sits on link 1, which has already turned by θ1, link 2 points in the direction <strong>θ1 + θ2</strong> from the x axis: the angles add up. Then:</p>
+<pre class="math">elbow_x = l1 · cos(θ1)                      elbow_y = l1 · sin(θ1)
+hand_x  = elbow_x + l2 · cos(θ1 + θ2)       hand_y  = elbow_y + l2 · sin(θ1 + θ2)</pre>
+<p>Each link is a step of a known length in a known direction, and the hand is where the two steps end. Nothing else is needed.</p>
+
+<h3>The same idea in 3D: "go there, then turn"</h3>
+<p>In 3D each frame is placed relative to the one before it by an <strong>offset</strong> (x, y, z: "go there") and a <strong>rotation</strong> ("turn"). That is the transform of A6. A rotation about the z axis by an angle <em>a</em> and about the x axis by <em>a</em> are:</p>
+<pre class="math">Rz(a) = | cos a  -sin a   0 |        Rx(a) = | 1    0      0    |
+        | sin a   cos a   0 |                | 0  cos a  -sin a |
+        |   0       0     1 |                | 0  sin a   cos a |</pre>
+<p>To handle offset and rotation together we write a pose as one <strong>4×4 matrix</strong>: the 3×3 rotation in the top left, the position (x, y, z) in the right column, and the fixed bottom row 0 0 0 1:</p>
+<pre class="math">T = | r11 r12 r13  x |
+    | r21 r22 r23  y |
+    | r31 r32 r33  z |
+    |  0   0   0   1 |</pre>
+<p>The bottom row is only there so that two poses combine by a plain <strong>matrix product</strong>: <code>T = Ta · Tb</code> means "do <em>Ta</em> first, then <em>Tb</em>, in the frame that <em>Ta</em> left you in". The order matters (a step forward then a turn is not a turn then a step forward), and the products read from the base to the hand. You may know the pose as 6 numbers (B1: 3 for position, 3 for orientation); the matrix holds the same information, in a form where chains are easy.</p>
+
+<h3>The Gen3 is a chain of such steps</h3>
+<p>Each joint of the arm, in the URDF, is: an <code>origin</code> (an offset and a fixed turn: numbers that never change, you saw one in B1 step 3) followed by a turn about the joint's own z axis by the joint angle <em>q</em>. In matrices:</p>
+<pre class="math">T_joint = Trans(x, y, z) · Rx(roll) · Rz(q)
+hand pose = T_joint1 · T_joint2 · … · T_joint7 · T_end_effector</pre>
+<p>The URDF origin has three angles (roll, pitch, yaw). In the Gen3 the pitch and yaw are zero (the file has numbers like 2.1343E-17, which is 0.00000000000000002, rounding noise), so only the roll is kept, and it is always ±90° or 180°. The last factor, <code>T_end_effector</code>, is the fixed joint that puts the hand frame at the end of joint 7. Computing this product is exactly what <code>robot_state_publisher</code> does for every link, 1000 times a second.</p>
+<p>Finally, the hand's orientation can also be written as <strong>roll, pitch, yaw</strong> (RPY): rotations about the fixed x, then y, then z axes. <code>tf2_echo</code> prints it that way, as a quaternion (A6), and as the same 4×4 matrix.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Get the programs</h3>
+<p>The package <code>code/b2-fk</code> holds the same two programs, <code>fk2</code> (the flat arm) and <code>fk_gen3</code> (the Gen3), in Python and in C++. They do not use ROS at all: they only calculate. Build it like a package from A5/A6.</p>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>cd code/b2-fk
+colcon build
+source install/setup.bash</code></pre>
+<pre class="out">Starting &gt;&gt;&gt; b2_fk
+Finished &lt;&lt;&lt; b2_fk [1.03s]
+
+Summary: 1 package finished [1.08s]</pre>
+<p>(The times differ on your computer. Both languages are built, whichever one you use below.)</p>
+</li>
+
+<li>
+<h3>Two links, by hand and by program</h3>
+<p>Take <em>l1</em> = 0.4 m, <em>l2</em> = 0.3 m, θ1 = 30° and θ2 = 45°. With a calculator (in degrees):</p>
+<pre class="math">elbow_x = 0.4 · cos 30° = 0.4 · 0.8660 = 0.3464
+elbow_y = 0.4 · sin 30° = 0.4 · 0.5    = 0.2000
+θ1 + θ2 = 75°
+hand_x  = 0.3464 + 0.3 · cos 75° = 0.3464 + 0.3 · 0.2588 = 0.4240
+hand_y  = 0.2000 + 0.3 · sin 75° = 0.2000 + 0.3 · 0.9659 = 0.4898</pre>
+<p>Now the program. It is the same four lines of arithmetic:</p>
+<div class="lang py">
+<pre class="src" data-file="code/b2-fk/py/fk2.py"><code>#!/usr/bin/env python3
+"""Forward kinematics of a flat arm with two links.
+
+  fk2.py THETA1 THETA2 [L1 L2]      angles in degrees, lengths in metres (default 0.4 and 0.3)
+
+Prints where the elbow and the hand are, and which way the hand points.
+"""
+import math
+import sys
+
+theta1, theta2 = (math.radians(float(a)) for a in sys.argv[1:3])
+l1, l2 = (float(a) for a in sys.argv[3:5]) if len(sys.argv) &gt;= 5 else (0.4, 0.3)
+
+# The elbow is l1 away from the base, in the direction theta1.
+elbow_x = l1 * math.cos(theta1)
+elbow_y = l1 * math.sin(theta1)
+
+# The second link points in the direction theta1 + theta2 (the angles add up).
+hand_x = elbow_x + l2 * math.cos(theta1 + theta2)
+hand_y = elbow_y + l2 * math.sin(theta1 + theta2)
+
+print(f"elbow: x = {elbow_x:.4f}  y = {elbow_y:.4f}")
+print(f"hand:  x = {hand_x:.4f}  y = {hand_y:.4f}  pointing {math.degrees(theta1 + theta2):.1f} degrees")</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/b2-fk/cpp/fk2.cpp"><code>// Forward kinematics of a flat arm with two links.
+//   fk2 THETA1 THETA2 [L1 L2]      angles in degrees, lengths in metres (default 0.4 and 0.3)
+// Prints where the elbow and the hand are, and which way the hand points.
+#include &lt;cmath&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+
+int main(int argc, char ** argv)
+{
+  if (argc &lt; 3) {
+    std::fprintf(stderr, "usage: fk2 THETA1 THETA2 [L1 L2]\n");
+    return 1;
+  }
+  const double deg = M_PI / 180.0;
+  const double theta1 = std::atof(argv[1]) * deg;
+  const double theta2 = std::atof(argv[2]) * deg;
+  const double l1 = argc &gt;= 5 ? std::atof(argv[3]) : 0.4;
+  const double l2 = argc &gt;= 5 ? std::atof(argv[4]) : 0.3;
+
+  // The elbow is l1 away from the base, in the direction theta1.
+  const double elbow_x = l1 * std::cos(theta1);
+  const double elbow_y = l1 * std::sin(theta1);
+
+  // The second link points in the direction theta1 + theta2 (the angles add up).
+  const double hand_x = elbow_x + l2 * std::cos(theta1 + theta2);
+  const double hand_y = elbow_y + l2 * std::sin(theta1 + theta2);
+
+  std::printf("elbow: x = %.4f  y = %.4f\n", elbow_x, elbow_y);
+  std::printf("hand:  x = %.4f  y = %.4f  pointing %.1f degrees\n", hand_x, hand_y, (theta1 + theta2) / deg);
+  return 0;
+}</code></pre>
+</div>
+<p>Run it with θ1 = 30 and θ2 = 45 (degrees):</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b2_fk fk2.py 30 45</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b2_fk fk2 30 45</code></pre></div>
+<pre class="out">elbow: x = 0.3464  y = 0.2000
+hand:  x = 0.4241  y = 0.4898  pointing 75.0 degrees</pre>
+<p>The same as by hand: the hand_x differs in the last digit only because the by-hand numbers were rounded at each step (0.4240 against 0.4241). The program also tells you which way the hand points: 75°, which is θ1 + θ2.</p>
+</li>
+
+<li>
+<h3>Try some shapes</h3>
+<p>Before running each of these, say where you expect the hand:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b2_fk fk2.py 0 0
+ros2 run b2_fk fk2.py 90 -90</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b2_fk fk2 0 0
+ros2 run b2_fk fk2 90 -90</code></pre></div>
+<pre class="out">elbow: x = 0.4000  y = 0.0000
+hand:  x = 0.7000  y = 0.0000  pointing 0.0 degrees
+elbow: x = 0.0000  y = 0.4000
+hand:  x = 0.3000  y = 0.4000  pointing 0.0 degrees</pre>
+<ul>
+<li><code>0 0</code>: the arm is stretched along x, and the hand is at <em>l1 + l2</em> = 0.7 m: the farthest the hand can be from the base.</li>
+<li><code>90 -90</code>: link 1 points straight up (the elbow is at (0, 0.4)), and the second joint bends it back by 90°, so link 2 points along x: the hand is at (0.3, 0.4), pointing in the direction 0°.</li>
+</ul>
+</li>
+
+<li>
+<h3>Two shapes, one hand position</h3>
+<p>Take the hand position of step 2, (0.4241, 0.4898). Now try θ1 = 68.2271° and θ2 = −45° (the elbow bends the other way):</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b2_fk fk2.py 68.2271 -45</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b2_fk fk2 68.2271 -45</code></pre></div>
+<pre class="out">elbow: x = 0.1484  y = 0.3715
+hand:  x = 0.4241  y = 0.4898  pointing 23.2 degrees</pre>
+<p>The hand is at the <strong>same position</strong> as with 30° and 45°, but the elbow is somewhere else, and the hand points 23.2° instead of 75°. Forward kinematics always gives exactly one answer: joint angles in, one pose out. The opposite question, "which angles give this hand position?", has two answers here (elbow one way or the other). With the Gen3's seven joints the number of answers is infinite (B1: redundancy). That is why inverse kinematics, in B3, is the harder direction.</p>
+</li>
+
+<li>
+<h3>The Gen3: the whole chain</h3>
+<p>Here is the program for the Gen3. The table at the top is the <code>origin</code> of each joint, copied from the URDF of B1 (offset in metres and roll in radians; π/2 = 1.5708 is 90°). Below it, the loop builds the product of the chain, one joint at a time, and prints where each joint's frame ends up:</p>
+<div class="lang py">
+<pre class="src" data-file="code/b2-fk/py/fk_gen3.py"><code>#!/usr/bin/env python3
+"""Forward kinematics of the Kinova Gen3 (7 joints): from seven joint angles to the pose of end_effector_link.
+
+  fk_gen3.py Q1 Q2 Q3 Q4 Q5 Q6 Q7      joint angles in radians
+
+The pose is given in base_link, the same as: ros2 run tf2_ros tf2_echo base_link end_effector_link
+"""
+import math
+import sys
+
+import numpy as np
+
+H = math.pi / 2
+
+# Where each joint sits relative to the one before it: (x, y, z in metres, roll in radians).
+# Copied from the &lt;origin&gt; lines of the URDF (lesson B1). Pitch and yaw are 0 in all of them.
+JOINTS = [
+    ("joint_1", 0.0, 0.0, 0.15643, math.pi),
+    ("joint_2", 0.0, 0.005375, -0.12838, H),
+    ("joint_3", 0.0, -0.21038, -0.006375, -H),
+    ("joint_4", 0.0, 0.006375, -0.21038, H),
+    ("joint_5", 0.0, -0.20843, -0.006375, -H),
+    ("joint_6", 0.0, 0.00017505, -0.10593, H),
+    ("joint_7", 0.0, -0.10593, -0.00017505, -H),
+]
+# The fixed joint end_effector: the hand frame, 6.15 cm after joint_7, turned upside down (roll pi).
+END_EFFECTOR = (0.0, 0.0, -0.061525, math.pi)
+
+
+def translate(x, y, z):
+    t = np.eye(4)
+    t[:3, 3] = [x, y, z]
+    return t
+
+
+def rot_x(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]])
+
+
+def rot_z(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, -s, 0, 0], [s, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+
+
+q = [float(a) for a in sys.argv[1:8]]
+pose = np.eye(4)  # the pose of base_link in itself: no movement
+for (name, x, y, z, roll), angle in zip(JOINTS, q):
+    # Go to the joint (offset, then its fixed turn), then turn by the joint angle about its z axis.
+    pose = pose @ translate(x, y, z) @ rot_x(roll) @ rot_z(angle)
+    print(f"{name} frame at  x = {pose[0, 3]:7.3f}  y = {pose[1, 3]:7.3f}  z = {pose[2, 3]:7.3f}")
+
+x, y, z, roll = END_EFFECTOR
+pose = pose @ translate(x, y, z) @ rot_x(roll)
+
+# Roll, pitch, yaw of the hand (rotation about x, then y, then z of the fixed frame), as tf2_echo prints them.
+r = pose[:3, :3]
+roll = math.degrees(math.atan2(r[2, 1], r[2, 2]))
+pitch = math.degrees(-math.asin(r[2, 0]))
+yaw = math.degrees(math.atan2(r[1, 0], r[0, 0]))
+print(f"end_effector_link: translation [{pose[0, 3]:.3f}, {pose[1, 3]:.3f}, {pose[2, 3]:.3f}]")
+print(f"end_effector_link: RPY (degree) [{roll:.3f}, {pitch:.3f}, {yaw:.3f}]")
+print("end_effector_link: matrix")
+for row in pose:
+    print("  " + " ".join(f"{v:7.3f}" for v in row))</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/b2-fk/cpp/fk_gen3.cpp"><code>// Forward kinematics of the Kinova Gen3 (7 joints): from seven joint angles to the pose of end_effector_link.
+//   fk_gen3 Q1 Q2 Q3 Q4 Q5 Q6 Q7      joint angles in radians
+// The pose is given in base_link, the same as: ros2 run tf2_ros tf2_echo base_link end_effector_link
+#include &lt;Eigen/Dense&gt;
+#include &lt;cmath&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+
+using Eigen::Matrix4d;
+
+namespace
+{
+const double H = M_PI / 2;
+
+// Where each joint sits relative to the one before it: (x, y, z in metres, roll in radians).
+// Copied from the &lt;origin&gt; lines of the URDF (lesson B1). Pitch and yaw are 0 in all of them.
+struct JointOrigin { const char * name; double x, y, z, roll; };
+const JointOrigin JOINTS[7] = {
+  {"joint_1", 0.0, 0.0, 0.15643, M_PI},
+  {"joint_2", 0.0, 0.005375, -0.12838, H},
+  {"joint_3", 0.0, -0.21038, -0.006375, -H},
+  {"joint_4", 0.0, 0.006375, -0.21038, H},
+  {"joint_5", 0.0, -0.20843, -0.006375, -H},
+  {"joint_6", 0.0, 0.00017505, -0.10593, H},
+  {"joint_7", 0.0, -0.10593, -0.00017505, -H},
+};
+// The fixed joint end_effector: the hand frame, 6.15 cm after joint_7, turned upside down (roll pi).
+const JointOrigin END_EFFECTOR = {"end_effector", 0.0, 0.0, -0.061525, M_PI};
+
+Matrix4d translate(double x, double y, double z)
+{
+  Matrix4d t = Matrix4d::Identity();
+  t(0, 3) = x; t(1, 3) = y; t(2, 3) = z;
+  return t;
+}
+
+Matrix4d rot_x(double a)
+{
+  Matrix4d r = Matrix4d::Identity();
+  r(1, 1) = std::cos(a); r(1, 2) = -std::sin(a);
+  r(2, 1) = std::sin(a); r(2, 2) = std::cos(a);
+  return r;
+}
+
+Matrix4d rot_z(double a)
+{
+  Matrix4d r = Matrix4d::Identity();
+  r(0, 0) = std::cos(a); r(0, 1) = -std::sin(a);
+  r(1, 0) = std::sin(a); r(1, 1) = std::cos(a);
+  return r;
+}
+}  // namespace
+
+int main(int argc, char ** argv)
+{
+  if (argc &lt; 8) {
+    std::fprintf(stderr, "usage: fk_gen3 Q1 Q2 Q3 Q4 Q5 Q6 Q7\n");
+    return 1;
+  }
+  Matrix4d pose = Matrix4d::Identity();  // the pose of base_link in itself: no movement
+  for (int i = 0; i &lt; 7; ++i) {
+    const JointOrigin &amp; j = JOINTS[i];
+    const double angle = std::atof(argv[i + 1]);
+    // Go to the joint (offset, then its fixed turn), then turn by the joint angle about its z axis.
+    pose = pose * translate(j.x, j.y, j.z) * rot_x(j.roll) * rot_z(angle);
+    std::printf("%s frame at  x = %7.3f  y = %7.3f  z = %7.3f\n", j.name, pose(0, 3), pose(1, 3), pose(2, 3));
+  }
+  const JointOrigin &amp; e = END_EFFECTOR;
+  pose = pose * translate(e.x, e.y, e.z) * rot_x(e.roll);
+
+  // Roll, pitch, yaw of the hand (rotation about x, then y, then z of the fixed frame), as tf2_echo prints them.
+  const double rad = 180.0 / M_PI;
+  const double roll = std::atan2(pose(2, 1), pose(2, 2)) * rad;
+  const double pitch = -std::asin(pose(2, 0)) * rad;
+  const double yaw = std::atan2(pose(1, 0), pose(0, 0)) * rad;
+  std::printf("end_effector_link: translation [%.3f, %.3f, %.3f]\n", pose(0, 3), pose(1, 3), pose(2, 3));
+  std::printf("end_effector_link: RPY (degree) [%.3f, %.3f, %.3f]\n", roll, pitch, yaw);
+  std::printf("end_effector_link: matrix\n");
+  for (int r = 0; r &lt; 4; ++r) {
+    std::printf("  %7.3f %7.3f %7.3f %7.3f\n", pose(r, 0), pose(r, 1), pose(r, 2), pose(r, 3));
+  }
+  return 0;
+}</code></pre>
+</div>
+<p>In the loop, the line with <code>translate</code>, <code>rot_x</code> and <code>rot_z</code> is <code>T_joint = Trans · Rx(roll) · Rz(q)</code> from the concepts, multiplied onto <code>pose</code>, the product so far. Run it with all joints at 0 (the arm standing straight up):</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b2_fk fk_gen3.py 0 0 0 0 0 0 0</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b2_fk fk_gen3 0 0 0 0 0 0 0</code></pre></div>
+<pre class="out">joint_1 frame at  x =   0.000  y =   0.000  z =   0.156
+joint_2 frame at  x =   0.000  y =  -0.005  z =   0.285
+joint_3 frame at  x =   0.000  y =  -0.012  z =   0.495
+joint_4 frame at  x =   0.000  y =  -0.018  z =   0.706
+joint_5 frame at  x =   0.000  y =  -0.024  z =   0.914
+joint_6 frame at  x =   0.000  y =  -0.025  z =   1.020
+joint_7 frame at  x =   0.000  y =  -0.025  z =   1.126
+end_effector_link: translation [0.000, -0.025, 1.187]
+end_effector_link: RPY (degree) [-0.000, -0.000, 0.000]
+end_effector_link: matrix
+    1.000   0.000   0.000   0.000
+    0.000   1.000   0.000  -0.025
+    0.000  -0.000   1.000   1.187
+    0.000   0.000   0.000   1.000</pre>
+<p>Each joint frame is higher than the one before: the arm climbs, link by link, to a hand at <strong>z = 1.187 m, y = −0.025 m</strong>. That is the number <code>tf2_echo</code> gave in A7 for the arm at zero. The matrix is the identity (no rotation) with the position in the last column. (A <code>-0.000</code> is a tiny negative number, about −0.0000000000000001, printed to 3 decimals: read it as 0.)</p>
+</li>
+
+<li>
+<h3>Check it against TF</h3>
+<p>A program that computes the same thing as <code>robot_state_publisher</code> should agree with it. Start the arm with fake hardware, as in A7, in a new terminal (<strong>T2</strong>):</p>
+<p class="env docker"><span class="where host">host</span> <strong>T2</strong>: open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> <strong>T2</strong>: open a terminal.</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>ros2 launch kortex_bringup gen3.launch.py robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true gripper:=robotiq_2f_85</code></pre>
+<p>In <strong>T1</strong>, send the arm to a pose that is not a special case: all seven joints at different angles (A7's topic command, 3 seconds to get there):</p>
+<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.3, 0.6, -0.4, 1.2, 0.5, -0.7, 0.9], time_from_start: {sec: 3}}]}"</pre>
+<p>Wait for the arm to stop in RViz, then ask TF for the hand pose, and stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd> after the first block:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">At time 1794143670.520992644
+- Translation: [0.674, -0.030, 0.649]
+- Rotation: in Quaternion (xyzw) [-0.349, 0.381, -0.384, 0.766]
+- Rotation: in RPY (radian) [-1.056, 0.321, -1.117]
+- Rotation: in RPY (degree) [-60.494, 18.394, -64.002]
+- Matrix:
+  0.416  0.322  0.850  0.674
+ -0.853  0.463  0.242 -0.030
+ -0.316 -0.826  0.467  0.649
+  0.000  0.000  0.000  1.000</pre>
+<p>(A line "Waiting for transform ..." may come first if you ran the command just after starting the launch: A6. The time stamp will differ.) Now give your program the same seven angles:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b2_fk fk_gen3.py 0.3 0.6 -0.4 1.2 0.5 -0.7 0.9</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b2_fk fk_gen3 0.3 0.6 -0.4 1.2 0.5 -0.7 0.9</code></pre></div>
+<pre class="out">joint_1 frame at  x =   0.000  y =   0.000  z =   0.156
+joint_2 frame at  x =  -0.002  y =  -0.005  z =   0.285
+joint_3 frame at  x =   0.110  y =  -0.046  z =   0.458
+joint_4 frame at  x =   0.224  y =  -0.088  z =   0.631
+joint_5 frame at  x =   0.428  y =  -0.078  z =   0.591
+joint_6 frame at  x =   0.532  y =  -0.070  z =   0.571
+joint_7 frame at  x =   0.622  y =  -0.044  z =   0.621
+end_effector_link: translation [0.674, -0.030, 0.649]
+end_effector_link: RPY (degree) [-60.494, 18.394, -64.003]
+end_effector_link: matrix
+    0.416   0.322   0.850   0.674
+   -0.853   0.463   0.242  -0.030
+   -0.316  -0.826   0.467   0.649
+    0.000   0.000   0.000   1.000</pre>
+<p>The translation, the RPY and all twelve numbers of the matrix are the same as TF's, to 3 decimals (the yaw differs by 0.001°, a rounding in the last digit of a quaternion). Your short program reproduced what the arm's TF tree computes. This is all that "the pose of the hand" is: a product of one matrix per joint. Close the arm with <kbd>Ctrl</kbd>+<kbd>C</kbd> in T2.</p>
+<div class="callout warn"><strong class="t">What this shows, and what it does not</strong> <code>fk_gen3</code> uses the numbers of the URDF, so it agrees with TF (which uses the same URDF), not with the physical arm. A real arm differs from its URDF by manufacturing tolerances of a millimetre or so. The check proves that you have understood and coded the chain correctly, which is what the lesson is for.</div>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li><code>fk2 30 45</code> prints a hand at (0.4241, 0.4898), and you can explain why the second link points at 75°,</li>
+<li><code>fk2 68.2271 -45</code> reaches the same point with a different elbow,</li>
+<li><code>fk_gen3</code> with the seven angles of step 6 prints a translation of [0.674, -0.030, 0.649], the same as <code>tf2_echo</code> on the arm,</li>
+<li>you can say what <code>T = Ta · Tb</code> means, and why the order of the product follows the chain from base to hand.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all four are true.</div>
+
+<h2>5. Exercise</h2>
+<p>Run <code>fk_gen3</code> with every angle at 0 except <code>joint_7</code> = 1.0. Compare with the zero pose of step 5: which of the numbers of the hand pose change, and which do not? Explain in one sentence.</p>
+<details>
+<summary>Answer</summary>
+<div class="lang py"><pre class="cmd"><code>ros2 run b2_fk fk_gen3.py 0 0 0 0 0 0 1.0 | tail -7</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b2_fk fk_gen3 0 0 0 0 0 0 1.0 | tail -7</code></pre></div>
+<pre class="out">end_effector_link: translation [0.000, -0.025, 1.187]
+end_effector_link: RPY (degree) [-0.000, -0.000, -57.296]
+end_effector_link: matrix
+    0.540   0.841   0.000   0.000
+   -0.841   0.540   0.000  -0.025
+    0.000  -0.000   1.000   1.187
+    0.000   0.000   0.000   1.000</pre>
+<p>(<code>tail -7</code> keeps only the last seven lines: the hand's translation, RPY and matrix.) The translation is the same as at zero, [0.000, −0.025, 1.187]. Only the orientation changed: the yaw is −57.296°, which is −1 rad (1 × 57.296). Joint 7 turns the hand about its own axis, and the hand frame lies on that axis, so the hand spins without moving. The yaw is negative for a positive angle because, with the arm straight up, the axis of joint 7 points downward (the rolls of the chain add up to 180°); you saw the same sign for <code>joint_1</code> in B1. In the matrix, the top-left 2×2 block changed from the identity to a rotation by −57.296° (cos = 0.540, sin = 0.841), and the last column (the position) and the third row did not.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li><strong>Forward kinematics</strong>: joint angles in, hand pose out. One answer, always. The reverse (inverse kinematics, B3) can have none, one, several or infinitely many.</li>
+<li>Flat two-link arm: <em>hand = (l1 cos θ1 + l2 cos(θ1+θ2), l1 sin θ1 + l2 sin(θ1+θ2))</em>. The angles add because link 2 rides on link 1.</li>
+<li>A pose is a <strong>4×4 matrix</strong>: rotation top left, position in the last column. Poses combine by matrix product, base first.</li>
+<li>Each Gen3 joint is <code>Trans(x, y, z) · Rx(roll) · Rz(q)</code>, with the first two taken from the URDF origin and <em>q</em> the joint angle. The hand pose is the product over the seven joints and the fixed <code>end_effector</code> joint.</li>
+<li>Your program matches <code>tf2_echo base_link end_effector_link</code>: translation, RPY and matrix. <code>robot_state_publisher</code> does this for every link of the arm.</li>
+<li>With all joints at 0 the hand is at z = 1.187 m, y = −0.025 m, pointing up.</li>
+</ul>
+
+<nav class="pager">
+<a href="b1-the-arm.html"><small>Previous</small>B1 · The arm</a>
+<span class="soon next"><small>Next</small>B3 · Inverse kinematics (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B1 · The arm</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part B · The Kinova Gen3</span></header>
+<main>
+
+<h1>B1 · The arm</h1>
+<p class="lead">Read the description of the Gen3: its seven joints, where each one can turn and how fast, how the gripper's fingers are tied together, and why a 7-joint arm has an extra choice that a 6-joint arm does not.</p>
+
+<h2>1. Goal</h2>
+<p>Everything the computer knows about the arm's shape is in one file, the URDF. RViz draws the arm from it (A6), <code>robot_state_publisher</code> makes the TF frames from it (A6), and ros2_control and MoveIt read the joint names and limits from it (A7, B4). In this lesson you generate that file, read it, and move the arm with sliders so you can see what the numbers in it mean.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>generated the arm's URDF from its xacro files and printed its tree of links and joints,</li>
+<li>found the 7 arm joints, and told which ones can turn without end and which have a range,</li>
+<li>read one joint's entry (parent, child, axis, limits) and converted its numbers from radians to degrees,</li>
+<li>moved every joint with sliders in RViz and seen the limits stop you,</li>
+<li>seen that the gripper has one slider but six joints, tied together by <code>mimic</code> tags,</li>
+<li>compared the 6-joint and 7-joint versions of the arm.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>Link, joint, URDF, xacro</h3>
+<p>A <strong>link</strong> is one rigid piece (a shoulder, a forearm). A <strong>joint</strong> connects two links: a <em>parent</em> and a <em>child</em>, and says how the child may move relative to the parent. A <strong>URDF</strong> is an XML file that lists all links and joints. Links and joints form a tree (the same rule as TF in A6: one parent per link). Each link becomes a TF frame, named after the link.</p>
+<p>The URDF of a real robot is long, so it is not written by hand. Kinova writes it as <strong>xacro</strong> files: a URDF with variables and macros, such as "the arm has <code>dof</code> joints". The tool <code>xacro</code> expands them into a plain URDF, given the choices you pass (<code>dof:=7</code>, <code>gripper:=robotiq_2f_85</code>). The launch file <code>view_robot.launch.py</code> runs <code>xacro</code> with these choices every time you start it.</p>
+
+<h3>Joint types you will meet</h3>
+<table>
+<tr><th>Type</th><th>What it does</th><th>In the Gen3</th></tr>
+<tr><td><code>fixed</code></td><td>No movement. It only places one link relative to another.</td><td>the base on the world, the hand frame on the last link, the gripper on the arm</td></tr>
+<tr><td><code>revolute</code></td><td>Turns around an axis, between a <strong>lower</strong> and an <strong>upper</strong> limit (radians).</td><td>joints 2, 4, 6, and the gripper's knuckles</td></tr>
+<tr><td><code>continuous</code></td><td>Turns around an axis with <strong>no limit</strong>: any number of full turns.</td><td>joints 1, 3, 5, 7</td></tr>
+</table>
+<p>A joint entry also gives an <strong>axis</strong> (the line it turns around, in the joint's own frame), an <strong>origin</strong> (where the joint sits relative to its parent) and a <strong>limit</strong> element: <code>velocity</code> (the fastest it may turn, rad/s) and <code>effort</code> (the most torque it may deliver, N·m), and for revolute joints <code>lower</code> and <code>upper</code>.</p>
+
+<h3>Radians and degrees</h3>
+<p>ROS uses radians. A full turn is 2π = 6.283 rad, so
+<code>degrees = radians × 180 / π</code>, which is about <code>radians × 57.296</code>. For example, 1 rad is 57.3°, and π/2 = 1.5708 rad is 90°.</p>
+
+<h3>The Gen3's seven joints</h3>
+<p>The joints alternate: one that <em>twists</em> the arm around its own length, then one that <em>bends</em> it. The twisting ones (1, 3, 5, 7) are the continuous ones, and the bending ones (2, 4, 6) are the revolute ones with limits. You will see this when you move the sliders. The numbers below are in the URDF you will print in step 3 (degrees computed with the formula above):</p>
+<table>
+<tr><th>Joint</th><th>Type</th><th>Range</th><th>Max speed</th><th>Max torque</th></tr>
+<tr><td><code>joint_1</code> (base twist)</td><td>continuous</td><td>none</td><td>1.3963 rad/s = 80°/s</td><td>39 N·m</td></tr>
+<tr><td><code>joint_2</code> (shoulder bend)</td><td>revolute</td><td>±2.24 rad = ±128.3°</td><td>1.3963 rad/s = 80°/s</td><td>39 N·m</td></tr>
+<tr><td><code>joint_3</code> (upper arm twist)</td><td>continuous</td><td>none</td><td>1.3963 rad/s = 80°/s</td><td>39 N·m</td></tr>
+<tr><td><code>joint_4</code> (elbow bend)</td><td>revolute</td><td>±2.57 rad = ±147.3°</td><td>1.3963 rad/s = 80°/s</td><td>39 N·m</td></tr>
+<tr><td><code>joint_5</code> (forearm twist)</td><td>continuous</td><td>none</td><td>1.2218 rad/s = 70°/s</td><td>9 N·m</td></tr>
+<tr><td><code>joint_6</code> (wrist bend)</td><td>revolute</td><td>±2.09 rad = ±119.7°</td><td>1.2218 rad/s = 70°/s</td><td>9 N·m</td></tr>
+<tr><td><code>joint_7</code> (hand twist)</td><td>continuous</td><td>none</td><td>1.2218 rad/s = 70°/s</td><td>9 N·m</td></tr>
+</table>
+<p>The big joints near the base carry the whole arm, so they are stronger (39 N·m) than the wrist joints (9 N·m).</p>
+
+<h3>Six numbers, seven joints</h3>
+<p>To say where the hand is you need <strong>6 numbers</strong>: 3 for its position (x, y, z) and 3 for its orientation (which way it points and how it is rolled). An arm with exactly 6 joints has just one or a few ways to reach a given hand pose. A 7-joint arm has <strong>one more joint than it needs</strong>, so there is a whole family of joint settings that put the hand in exactly the same place: the elbow can swing around while the hand stays still. That extra freedom is called <strong>redundancy</strong>. It is useful (you can keep the elbow away from an obstacle) and it makes planning a little harder (a program must choose one of many). We calculate it properly in B3. Here you only count the joints.</p>
+
+<h3>The gripper's mimic joints</h3>
+<p>The Robotiq 2F-85 gripper is driven by one motor, but its fingers are small linkages with six moving joints. In the URDF, only one of them, <code>robotiq_85_left_knuckle_joint</code>, is free. The other five carry a <strong><code>&lt;mimic&gt;</code></strong> tag: "copy that joint, times a multiplier". A viewer or a driver then moves all six by moving one number.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Generate the URDF and print the tree</h3>
+<p><span class="where host">host</span> <span class="env docker">Open a terminal in the <code>ros2-tutorial</code> folder and enter a container:</span><span class="env local">Open a terminal in the <code>ros2-tutorial</code> folder.</span></p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> Run <code>xacro</code> on the arm's top file, with the same arguments <code>view_robot.launch.py</code> uses, and save the result:</p>
+<pre class="cmd"><code>xacro $(ros2 pkg prefix kortex_description)/share/kortex_description/robots/kinova.urdf.xacro robot_ip:=xxx.yyy.zzz.www name:=kinova arm:=gen3 gripper:=robotiq_2f_85 dof:=7 &gt; /tmp/kinova.urdf
+wc -l /tmp/kinova.urdf</code></pre>
+<pre class="out">625 /tmp/kinova.urdf</pre>
+<p>(<code>robot_ip</code> is needed by the file but unused here: it is the address of a real arm.) The file has 625 lines. <code>check_urdf</code> parses it and prints the tree of links:</p>
+<pre class="cmd"><code>check_urdf /tmp/kinova.urdf</code></pre>
+<pre class="out" style="white-space:pre;overflow-x:auto">robot name is: kinova
+---------- Successfully Parsed XML ---------------
+root Link: world has 1 child(ren)
+    child(1):  base_link
+        child(1):  shoulder_link
+            child(1):  half_arm_1_link
+                child(1):  half_arm_2_link
+                    child(1):  forearm_link
+                        child(1):  spherical_wrist_1_link
+                            child(1):  spherical_wrist_2_link
+                                child(1):  bracelet_link
+                                    child(1):  end_effector_link
+                                        child(1):  robotiq_85_base_link
+                                            child(1):  robotiq_85_left_inner_knuckle_link
+                                            child(2):  robotiq_85_left_knuckle_link
+                                                child(1):  robotiq_85_left_finger_link
+                                                    child(1):  robotiq_85_left_finger_tip_link
+                                            child(3):  robotiq_85_right_inner_knuckle_link
+                                            child(4):  robotiq_85_right_knuckle_link
+                                                child(1):  robotiq_85_right_finger_link
+                                                    child(1):  robotiq_85_right_finger_tip_link</code></pre>
+<p>This is the TF tree of A6, before anything moves. The arm is a single chain: <code>world</code>, <code>base_link</code>, then seven more links up to <code>bracelet_link</code> and the hand frame <code>end_effector_link</code>. The gripper hangs off the end and splits into a left and a right finger.</p>
+</li>
+
+<li>
+<h3>List the joints</h3>
+<p>Every link is connected by one joint. List them with their types (the line number in front of each is its place in the file):</p>
+<pre class="cmd"><code>grep -n '&lt;joint name=.*type=' /tmp/kinova.urdf</code></pre>
+<pre class="out">110:  &lt;joint name="base_joint" type="fixed"&gt;
+159:  &lt;joint name="joint_1" type="continuous"&gt;
+188:  &lt;joint name="joint_2" type="revolute"&gt;
+217:  &lt;joint name="joint_3" type="continuous"&gt;
+246:  &lt;joint name="joint_4" type="revolute"&gt;
+275:  &lt;joint name="joint_5" type="continuous"&gt;
+304:  &lt;joint name="joint_6" type="revolute"&gt;
+333:  &lt;joint name="joint_7" type="continuous"&gt;
+341:  &lt;joint name="end_effector" type="fixed"&gt;
+563:  &lt;joint name="robotiq_85_base_joint" type="fixed"&gt;
+568:  &lt;joint name="robotiq_85_left_knuckle_joint" type="revolute"&gt;
+575:  &lt;joint name="robotiq_85_right_knuckle_joint" type="revolute"&gt;
+583:  &lt;joint name="robotiq_85_left_finger_joint" type="fixed"&gt;
+588:  &lt;joint name="robotiq_85_right_finger_joint" type="fixed"&gt;
+593:  &lt;joint name="robotiq_85_left_inner_knuckle_joint" type="revolute"&gt;
+601:  &lt;joint name="robotiq_85_right_inner_knuckle_joint" type="revolute"&gt;
+609:  &lt;joint name="robotiq_85_left_finger_tip_joint" type="revolute"&gt;
+617:  &lt;joint name="robotiq_85_right_finger_tip_joint" type="revolute"&gt;</code></pre>
+<p>18 joints. Three are plain placements (<code>base_joint</code>, <code>end_effector</code> and the gripper's <code>robotiq_85_base_joint</code>), seven are the arm (<code>joint_1</code> to <code>joint_7</code>, alternating continuous and revolute, as in the table), and the rest belong to the gripper. The two fixed <code>..._finger_joint</code> entries just glue a finger onto its knuckle.</p>
+</li>
+
+<li>
+<h3>Read one joint</h3>
+<p>Print <code>joint_2</code>, the shoulder bend, from its first line to its closing tag:</p>
+<pre class="cmd"><code>grep -A6 'joint name="joint_2" type' /tmp/kinova.urdf</code></pre>
+<pre class="out">  &lt;joint name="joint_2" type="revolute"&gt;
+    &lt;origin rpy="1.5708 2.1343E-17 -1.1102E-16" xyz="0 0.005375 -0.12838"/&gt;
+    &lt;parent link="shoulder_link"/&gt;
+    &lt;child link="half_arm_1_link"/&gt;
+    &lt;axis xyz="0 0 1"/&gt;
+    &lt;limit effort="39" lower="-2.24" upper="2.24" velocity="1.3963"/&gt;
+  &lt;/joint&gt;</code></pre>
+<p>Line by line:</p>
+<ul>
+<li><code>parent</code> and <code>child</code>: this joint connects <code>shoulder_link</code> to <code>half_arm_1_link</code>.</li>
+<li><code>origin</code>: where the joint sits relative to its parent. <code>xyz</code> is the offset in metres (here 5 mm sideways and 12.8 cm down) and <code>rpy</code> is a rotation in radians as roll, pitch, yaw: 1.5708 rad is 90° around x (the other two numbers, like 2.1343E-17, are 0.00000000000000002: rounding noise that you can read as zero). This fixed offset is a transform like the ones in A6.</li>
+<li><code>axis</code>: the joint turns around its own z axis (<code>0 0 1</code>), after the origin transform has been applied.</li>
+<li><code>limit</code>: it may deliver up to 39 N·m, turns at most 1.3963 rad/s (1.3963 × 57.296 = 80.0°/s), and its angle must stay between −2.24 and +2.24 rad (±128.3°).</li>
+</ul>
+<p>Now compare the limit lines of all joints:</p>
+<pre class="cmd"><code>grep -n '&lt;limit' /tmp/kinova.urdf</code></pre>
+<pre class="out">164:    &lt;limit effort="39" velocity="1.3963"/&gt;
+193:    &lt;limit effort="39" lower="-2.24" upper="2.24" velocity="1.3963"/&gt;
+222:    &lt;limit effort="39" velocity="1.3963"/&gt;
+251:    &lt;limit effort="39" lower="-2.57" upper="2.57" velocity="1.3963"/&gt;
+280:    &lt;limit effort="9" velocity="1.2218"/&gt;
+309:    &lt;limit effort="9" lower="-2.09" upper="2.09" velocity="1.2218"/&gt;
+338:    &lt;limit effort="9" velocity="1.2218"/&gt;
+573:    &lt;limit effort="50" lower="0.0" upper="0.8" velocity="0.5"/&gt;
+580:    &lt;limit effort="50" lower="-0.8" upper="0.0" velocity="0.5"/&gt;
+599:    &lt;limit effort="50" lower="0.0" upper="0.8" velocity="0.5"/&gt;
+607:    &lt;limit effort="50" lower="-0.8" upper="0.0" velocity="0.5"/&gt;
+615:    &lt;limit effort="50" lower="-0.8" upper="0.0" velocity="0.5"/&gt;
+623:    &lt;limit effort="50" lower="0.0" upper="0.8" velocity="0.5"/&gt;</code></pre>
+<p>Match the line numbers with the joints of step 2: lines 164, 222, 280 and 338 are joints 1, 3, 5 and 7, and they have <strong>no</strong> <code>lower</code>/<code>upper</code>, which is what <code>continuous</code> means. Lines 193, 251 and 309 are joints 2, 4 and 6, with the ranges in the table. Lines 573 onward are the gripper (0.8 rad is its largest knuckle angle).</p>
+</li>
+
+<li>
+<h3>Move the arm with sliders</h3>
+<p>Start the viewer (it is the same launch as in A6, with the gripper):</p>
+<pre class="cmd"><code>ros2 launch kortex_description view_robot.launch.py gripper:=robotiq_2f_85</code></pre>
+<p>Two windows open: RViz, and a small window called <strong>Joint State Publisher</strong> with sliders. This is the node <code>joint_state_publisher_gui</code>: it reads the URDF, makes one slider per free joint, and publishes <code>/joint_states</code> (A7) with the slider values. <code>robot_state_publisher</code> turns them into TF, and RViz draws it. At the start every slider is at 0 and the arm stands straight up:</p>
+<figure>
+<img src="img/b1-home-rviz.png" alt="RViz showing the Kinova arm with the gripper standing straight up over a grid." width="520">
+<figcaption>All joints at zero. This is the "home" pose of the URDF, not the arm's own home position.</figcaption>
+</figure>
+<p>Look at what the node publishes, in a second terminal (<span class="env docker">run <code>docker/run_ros2.sh</code> there too</span><span class="env local">open another terminal</span>):</p>
+<pre class="cmd"><code>ros2 topic echo --once /joint_states --field name</code></pre>
+<pre class="out">['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6', 'joint_7', 'robotiq_85_left_knuckle_joint', 'robotiq_85_right_knuckle_joint', 'robotiq_85_left_inner_knuckle_joint', 'robotiq_85_right_inner_knuckle_joint', 'robotiq_85_left_finger_tip_joint', 'robotiq_85_right_finger_tip_joint']</code></pre>
+<p>13 joint names: the 7 arm joints and the 6 gripper joints (the fixed joints do not appear: they never move). Now drag the sliders, one at a time, back to 0 between tries, and write down what each one does:</p>
+<ul>
+<li><code>joint_1</code>: the whole arm turns around the vertical line through the base. Its slider runs from −3.14 to +3.14 (−π to +π), the node's range for a joint with no limit: the joint itself could turn further.</li>
+<li><code>joint_2</code>: the arm leans forward and back at the shoulder. Push the slider to its end: it stops at 2.24 (the limit you read in step 3).</li>
+<li><code>joint_3</code>: it twists the arm around its own length, so on a straight arm you see almost nothing. Bend <code>joint_4</code> first, then turn <code>joint_3</code>: the forearm swings sideways (we measured the hand with <code>tf2_echo</code>: with <code>joint_4</code> = 1.0 it was 0.405 m ahead of the base, and after turning <code>joint_3</code> by 90° it was 0.417 m to the side).</li>
+<li><code>joint_4</code>, <code>joint_6</code>: the elbow and wrist bend, with the limits 2.57 and 2.09.</li>
+<li><code>joint_5</code>, <code>joint_7</code>: twist the forearm and the hand.</li>
+</ul>
+<p>For example, a pose like this one has <code>joint_1</code> = 0.8, <code>joint_2</code> = 0.7, <code>joint_4</code> = −1.4, <code>joint_6</code> = 0.8 and the gripper half closed (0.5):</p>
+<figure>
+<img src="img/b1-pose-rviz.png" alt="RViz showing the Kinova arm bent at the shoulder, elbow and wrist, with the gripper fingers half closed." width="520">
+<figcaption>A bent pose. (Made by publishing these values to <code>/joint_states</code> directly instead of dragging the sliders, with the camera moved back a little, so you can compare your own pose with it. The sliders produce the same message.)</figcaption>
+</figure>
+<p>Keep this window open for the next step.</p>
+</li>
+
+<li>
+<h3>The gripper has one slider and six joints</h3>
+<p>Find the slider of the gripper, <code>robotiq_85_left_knuckle_joint</code> (scroll the slider list), and drag it. Its range is 0 to 0.8: 0 is open, and about 0.8 is closed. Both fingers move, though you only moved one joint. In a terminal, the five joints that follow it are the ones with a <code>mimic</code> tag:</p>
+<pre class="cmd"><code>grep -n '&lt;mimic' /tmp/kinova.urdf</code></pre>
+<pre class="out">581:    &lt;mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1"/&gt;
+598:    &lt;mimic joint="robotiq_85_left_knuckle_joint"/&gt;
+606:    &lt;mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1"/&gt;
+614:    &lt;mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1"/&gt;
+622:    &lt;mimic joint="robotiq_85_left_knuckle_joint"/&gt;</code></pre>
+<p>Five joints copy the left knuckle. A missing <code>multiplier</code> means 1 (same angle), and <code>multiplier="-1"</code> means the opposite angle: the right finger closes by turning the other way, so its range in step 3 is −0.8 to 0. This is also why a ROS 2 gripper controller later needs to command only one joint, and why the gripper's ros2_control section in the URDF lists only <code>robotiq_85_left_knuckle_joint</code>.</p>
+<p>Close the viewer with <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal where you started it.</p>
+</li>
+
+<li>
+<h3>Compare 6 and 7 joints</h3>
+<p>The file takes <code>dof:=6</code> or <code>dof:=7</code>. Count the joints that can move in each version of the arm (without the gripper):</p>
+<pre class="cmd"><code>for d in 6 7; do echo "dof=$d: $(xacro $(ros2 pkg prefix kortex_description)/share/kortex_description/robots/kinova.urdf.xacro robot_ip:=xxx.yyy.zzz.www name:=kinova arm:=gen3 dof:=$d | grep -c 'type="continuous"\|type="revolute"') movable joints"; done</code></pre>
+<pre class="out">dof=6: 6 movable joints
+dof=7: 7 movable joints</pre>
+<p>The 6-joint arm has exactly the 6 numbers the hand pose needs, and the 7-joint arm has one more. We use the 7-DoF Gen3 in this course, which is why, from B3, a pose will have many solutions, and why B4 has to choose one.</p>
+<details>
+<summary>Two sets of limits in one description (optional)</summary>
+<p>The URDF you printed has a second part, the <code>&lt;ros2_control&gt;</code> section that A7 explained. It lists the joint command interfaces, and it has its own minimum and maximum. Print the one for <code>joint_2</code>:</p>
+<pre class="cmd"><code>grep -A4 'joint name="joint_2"&gt;' /tmp/kinova.urdf</code></pre>
+<pre class="out">    &lt;joint name="joint_2"&gt;
+      &lt;command_interface name="position"&gt;
+        &lt;param name="min"&gt;-2.41&lt;/param&gt;
+        &lt;param name="max"&gt;2.41&lt;/param&gt;
+      &lt;/command_interface&gt;</code></pre>
+<p>It says ±2.41 rad, while the <code>limit</code> element in step 3 said ±2.24. The two are not the same number, and they are used by different parts: tools that read the URDF joint limits (such as the sliders) use ±2.24, and the ros2_control section is read by the hardware component. The same is true for the other two bending joints (the control section has ±2.66 for <code>joint_4</code> and ±2.23 for <code>joint_6</code>, against ±2.57 and ±2.09). When you plan motion, keep to the tighter URDF numbers. We did not test what happens if a command goes between the two.</p>
+</details>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<p>You are done when:</p>
+<ul>
+<li><code>wc -l /tmp/kinova.urdf</code> prints 625 and <code>check_urdf</code> prints the chain from <code>world</code> to the two fingers,</li>
+<li>you can say which joints (1, 3, 5, 7) have no limit, and how the file shows it,</li>
+<li>the <code>joint_2</code> slider in RViz stops at 2.24, and the <code>joint_1</code> slider at 3.14,</li>
+<li>dragging the one gripper slider moves both fingers, and you can name the tag that does it.</li>
+</ul>
+<div class="callout ok"><strong class="t">Done when</strong> all four are true.</div>
+
+<h2>5. Exercise</h2>
+<p>How fast can <code>joint_6</code> turn, in degrees per second, and how much torque can it deliver? Find the two numbers in the URDF with one command, and convert the speed.</p>
+<details>
+<summary>Answer</summary>
+<pre class="cmd"><code>grep -A6 'joint name="joint_6" type' /tmp/kinova.urdf</code></pre>
+<pre class="out">  &lt;joint name="joint_6" type="revolute"&gt;
+    &lt;origin rpy="1.5708 9.2076E-28 -8.2157E-15" xyz="0 0.00017505 -0.10593"/&gt;
+    &lt;parent link="spherical_wrist_1_link"/&gt;
+    &lt;child link="spherical_wrist_2_link"/&gt;
+    &lt;axis xyz="0 0 1"/&gt;
+    &lt;limit effort="9" lower="-2.09" upper="2.09" velocity="1.2218"/&gt;
+  &lt;/joint&gt;</code></pre>
+<p><code>effort="9"</code>: 9 N·m. <code>velocity="1.2218"</code> rad/s, and 1.2218 × 57.296 = 70.0°/s. Its range is ±2.09 rad = ±119.7°. A wrist joint is slower and weaker than a shoulder joint (80°/s and 39 N·m), which is why the table groups them this way.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A <strong>URDF</strong> lists links (rigid pieces) and joints (parent, child, origin, axis, limits). The Gen3's is generated by <code>xacro</code> with <code>dof:=7 gripper:=robotiq_2f_85</code>; <code>check_urdf</code> prints its tree.</li>
+<li>Joints <code>fixed</code>, <code>revolute</code> (with a range) and <code>continuous</code> (no range). Joints 1, 3, 5, 7 of the Gen3 twist without limit; 2, 4, 6 bend within ±2.24, ±2.57 and ±2.09 rad (±128.3°, ±147.3°, ±119.7°).</li>
+<li>Speeds are 80°/s for joints 1–4 and 70°/s for joints 5–7; torques 39 N·m and 9 N·m. Degrees = radians × 57.296.</li>
+<li><code>joint_state_publisher_gui</code> makes one slider per free joint, <code>robot_state_publisher</code> and RViz draw the result.</li>
+<li>The gripper has one free joint and five <strong>mimic</strong> joints that copy it, some with multiplier −1.</li>
+<li>The hand pose is 6 numbers; 7 joints is one more than needed, which is <strong>redundancy</strong>: many joint settings, one hand pose (B3).</li>
+<li>The description also holds a second, wider set of limits in its <code>&lt;ros2_control&gt;</code> section: plan with the tighter URDF ones.</li>
+</ul>
+
+<nav class="pager">
+<a href="b0-kortex-workspace.html"><small>Previous</small>B0 · The Kinova workspace</a>
+<a class="next" href="b2-forward-kinematics.html"><small>Next</small>B2 · Forward kinematics</a>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

@@ -100,3 +100,4 @@ header.site .langsw button[aria-pressed="true"] { background: var(--accent); col
 .byline { color: var(--muted); margin-top: -.5rem; }
 header.site > small { font-size: .85rem; color: var(--muted); margin-right: auto; }
 header.site > small a { color: inherit; font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+pre.math { white-space: pre; background: var(--out-bg); color: var(--out-fg); padding: 12px 14px; border: 1px solid var(--line); }

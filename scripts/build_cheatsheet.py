@@ -103,8 +103,10 @@ SECTIONS = [
         ("ros2 control switch_controllers --deactivate <controller> --activate <controller>", "Hand the joints from one controller to another"),
         ("ros2 topic echo /joint_states --once", "Read the joint names, angles, velocities and efforts"),
     ]),
-    ("The Kinova arm", "A6, A7", "a7-ros2-control.html", [
+    ("The Kinova arm", "A6, A7, B1", "a7-ros2-control.html", [
         ("ros2 launch kortex_description view_robot.launch.py gripper:=robotiq_2f_85", "The arm in RViz with joint sliders (no controllers)"),
+        ("xacro $(ros2 pkg prefix kortex_description)/share/kortex_description/robots/kinova.urdf.xacro robot_ip:=xxx.yyy.zzz.www name:=kinova arm:=gen3 gripper:=robotiq_2f_85 dof:=7 > /tmp/kinova.urdf", "Generate the arm's URDF from the xacro files"),
+        ("check_urdf /tmp/kinova.urdf", "Check a URDF and print its tree of links"),
         ("ros2 launch kortex_bringup gen3.launch.py robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true gripper:=robotiq_2f_85", "The arm with controllers and fake hardware: the same launch file as the real arm"),
         ("ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory \"{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0, 0, 0, 0, 0, 0, 0], time_from_start: {sec: 2}}]}\"", "Move all seven joints to zero in 2 seconds"),
     ]),
@@ -112,7 +114,7 @@ SECTIONS = [
 
 KEYS = {"Ctrl+C", "Tab"}  # keystrokes, not commands: no Copy button
 TITLE = "ROS 2 basics cheatsheet"
-INTRO = ("Commands from lessons A0 to A7 (ROS 2 Jazzy). Words in <angle brackets> are placeholders: "
+INTRO = ("Commands from lessons A0 to A7 and B1 (ROS 2 Jazzy). Words in <angle brackets> are placeholders: "
          "replace them, without the brackets. Text in quotes like \"{data: hello}\" is YAML: field names and their values, "
          "as the message, request or goal defines them (ros2 interface show <type> lists the fields). Course: https://github.com/Turgibot/ros2-tutorial")
 
