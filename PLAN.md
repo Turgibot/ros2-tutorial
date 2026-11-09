@@ -60,19 +60,19 @@ Rules: one new idea at a time; nothing used before it is taught; every number/fo
   `prefix`; controller YAMLs and MoveIt config need hand editing, to be checked). Written and run (B5: `code/b5-dual`). The shipped `kortex_dual_robots.xacro` is BROKEN (`Invalid parameter "sim"`: `load_robot` now needs `parent`, an origin block and more), so the course has its own `dual.urdf.xacro`, a generator `scripts/make_config.py` for the MoveIt/ros2_control files, one controller_manager with a trajectory controller per arm (no namespaces), no grippers, fake hardware only. `move_arm left|right X Y Z R P Y` (Python and C++), poses in `world`. Found: a goal that touches the other arm fails (goal in collision); MoveIt sometimes answers `START_STATE_INVALID` ("Start state out of bounds") when a continuous joint ends past +-pi (e.g. 3.35 rad); recovery = send the equivalent angle (-2 pi) to the controller with `ros2 action send_goal` (tested). Roll +-180 degree targets made this very frequent; benign wrist poses (B2 style) rarely. NOT run: RViz with two arms (no screenshot: another window covered RViz), real arms, grippers, namespaces, planning both arms in one request.
 
 **Part C, Simulation with ROS 2 tools, milestone 2**
-- C1 Gazebo basics: worlds, SDF, models, physics, play/pause; the `ros_gz` bridge and `/clock`.
+- C1 Gazebo basics: worlds, SDF, models, physics, play/pause; the `ros_gz` bridge and `/clock`. Written and run (C1: `code/c1-gazebo`, `box_height` in Python and C++, headless `gz sim -s`, play/pause/step through the bridged `ControlWorld` service; a falling box lands at 0.44 s against 0.428 s from the formula. NOT working: `reset` through the bridge. `{multi_step: N}` without `pause: true` also plays.)
 - C2 Put the Gen3 in Gazebo (`kortex_sim_control.launch.py sim_gazebo:=true`), joints and the gripper, `gz_ros2_control`.
   The sim launch defaults to NO gripper: pass `gripper:=robotiq_2f_85` (the upstream README says otherwise). The
   gripper action is `control_msgs/action/ParallelGripperCommand` (the upstream README shows the old `GripperCommand`).
-  See "Environment test results".
-- C3 Build the table and lettered blocks in SDF; friction and mass for stable grasps.
-- C4 Sensors and state over ROS: `/joint_states`, ground-truth block poses, a camera topic.
-- C5 Drive the simulated arm from MoveIt 2 through ros2_control.
+  See "Environment test results". Written and run (C2: `code/c2-sim/launch/sim.launch.py`, a copy of the upstream launch with `gui`, `world`, `gripper` (default robotiq), `x y z`, `vision`, `sensors_in_world`, `physics_engine` arguments, renderer `ogre2`, `--headless-rendering`; same controller names and commands as A7; the arm stops on the floor, the fake arm goes 32 cm through it; the action says SUCCEEDED even when the arm was stopped short; `tool_frame` does not exist with a gripper, use `end_effector_link`).
+- C3 Build the table and lettered blocks in SDF; friction and mass for stable grasps. Written and run (C3: `code/c3-world`: `models/block_A..D` with letter textures (a texture shows only with `<diffuse>1 1 1 1</diffuse>` next to `pbr/albedo_map`, else black), `worlds/lab.sdf`: table 0.6 x 0.9 x 0.3 at x=0.65, blocks 5 cm at x=0.50, y=-0.18/-0.06/0.06/0.18, two cameras; `check_settled` in Python and C++; blocks rest to 1 micrometre, towers of 3 stay up; pictures made with cameras in the simulation, no window needed). Grasping NOT tested there.
+- C4 Sensors and state over ROS: `/joint_states`, ground-truth block poses, a camera topic. Written and run (C4: `block_tf` in Python and C++, `pixel_to_table.py`; camera images WORK: the robot description's default renderer was `ogre`, now `ogre2`, plus `--headless-rendering`, and only ONE `Sensors` system may exist (two crash Gazebo with an Ogre HLMS exception), so `sim.launch.py` has `sensors_in_world`; a colour blob in the overhead image gives block positions within 5 mm; camera rates are far below the settings (about 7 Hz at 10 Hz alone, 1 to 2 Hz with the arm), cause not investigated).
+- C5 Drive the simulated arm from MoveIt 2 through ros2_control. Written and run (C5: `code/c5-moveit/launch/move_group.launch.py`, B4's programs unchanged; MoveIt's scene is separate from Gazebo's world: without the table in the scene the plan succeeds and the arm stops on the table 13 cm above the goal; the MoveIt gripper controller type (`GripperCommand`) does not match Gazebo's (`ParallelGripperCommand`), NOT tried; MoveIt IK picks arbitrary arm shapes; fingers reach about 14 to 15 cm below `end_effector_link`; planning is intermittent, one descent failed once, ten in a row worked in another test).
 
 **Part D, from symbols to motion, milestone 3**
-- D1 Block poses -> towers: the world estimator and how a tower is read from heights.
-- D2 A pick-and-place action server: approach, grasp, lift, place; waypoints and Cartesian paths.
-- D3 Symbolic action -> motion: `unstack X Y`, `stack`, `putdown` as skills.
+- D1 Block poses -> towers: the world estimator and how a tower is read from heights. Written and run (D1: `code/d1-towers`, `towers` in Python and C++, publishes `/towers` as a String (transient local) only when it changes; `held: X` shown only for a falling block in D1, and for a carried block in D2).
+- D2 A pick-and-place action server: approach, grasp, lift, place; waypoints and Cartesian paths. Written and run (D2: `code/d2-pickplace`: `d2_interfaces/PickPlace` action, `pick_place_server.py` (Python; own IK from B3 with joint 3 fixed at 2.5 rad, straight lines of 1 cm steps, no MoveIt), clients in Python and C++). **THE GRIP IS SIMULATED**: the Robotiq could not hold a block in Gazebo (bullet-featherstone and DART): closing to 0.8 ejects the block, closing to 0.2/0.25 jams or does not move, `DetachableJoint` attaches at world load, `set_pose` on a dynamic block sags 22 cm at 100 Hz. So blocks are STATIC models (`lab_arm.launch.py static_blocks:=true`) carried with `set_pose` at 50 Hz while 'held'. OPEN: make the real gripper hold a block in simulation (finger contact and mimic joints are the suspects). Towers of at most 3 blocks (the hand cannot reach 0.61 m pointing down at x=0.5).
+- D3 Symbolic action -> motion: `unstack X Y`, `stack`, `putdown` as skills. Written and run (D3: `code/d3-skills`: `execute_server.py` speaks A3's `Execute` action, preconditions from `/towers`, targets from block poses, motion through `/pick_place`; `run_plan` in Python and C++; the server is Python only; `pickup` is not a skill because the hand state is not modelled: each skill is a whole pick and place).
 
 **Part E, the paper on robots, milestones 4 to 6**
 - E1 Wrap the recognizer as a ROS 2 node; read the live posterior in RViz or a plot.
@@ -87,11 +87,9 @@ Part E (the GR-Blocks paper on robots) is optional and lives at the end.
 ## Digital twin (open questions)
 - `ros2_kortex` gives three backends behind the same controller names: mock hardware, Gazebo, the real driver
   (`robot_ip:=192.168.1.10`). Dynamics, latency and gripper behaviour still differ between them.
-- Wrist camera in Gazebo: `/wrist_mounted_camera/{image,depth_image,points,camera_info}` exist on the Gazebo and ROS
-  sides, but no image arrived within 40 s. Cause not found yet (render engine in the container? sensor needs a
-  subscriber? a world without the sensor plugin?). Must be solved before any vision work.
+- Wrist camera in Gazebo: SOLVED in C4 (renderer `ogre2`, `--headless-rendering`, one `Sensors` system). Images arrive, at low rates.
 - Mimic joints: only `robotiq_85_left_knuckle_joint` appears in `/joint_states`; the other finger joints are not
-  reported. Whether blocks can be grasped is untested (upstream gz-sim issue 1684).
+  reported. Grasping a block FAILED in tests (see D2 above): the twin does not reproduce a real grip yet. Ideas not tried: other friction/contact parameters, a simpler finger collision model, a larger block with a wider margin, replacing mimic joints by commanded joints.
 - MoveIt upstream recommends Cyclone DDS; our scripts force Fast DDS. Test which works, and for sim plus real together.
 - Two-arm MoveIt config: only the dual-robot xacro exists upstream.
 - Decide: does the twin follow the real arm's `/joint_states`, or run the same commands in parallel?

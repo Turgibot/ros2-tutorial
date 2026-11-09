@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>d2_pickplace</name>
+  <version>0.1.0</version>
+  <description>Lesson D2: a pick-and-place action server for the simulated Gen3 (Python), and clients in Python and C++</description>
+  <maintainer email="you@example.com">course</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>rclpy</depend>
+  <depend>d2_interfaces</depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>ros_gz_interfaces</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

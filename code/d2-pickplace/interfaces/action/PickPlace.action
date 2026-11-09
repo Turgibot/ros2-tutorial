@@ -1,0 +1,13 @@
+# Goal: take the block called `block` (a letter, e.g. "B") from where it is now, and put it down with its
+# centre at (x, y, z) in base_link, in metres. A block resting on the table has its centre at z = 0.325.
+string block
+float64 x
+float64 y
+float64 z
+---
+# Result: how it ended
+bool success
+string message
+---
+# Feedback: the step just finished
+string stage       # open, above, descend, grasp, lift, transit, lower, release, retreat

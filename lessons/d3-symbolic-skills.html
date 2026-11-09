@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D3 · Symbolic skills</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part D · From symbols to motion</span></header>
+<main>
+
+<h1>D3 · Symbolic actions as motion skills</h1>
+<p class="lead">"unstack B C" in, arm motion out: the layer that connects a plan to the pick-and-place of D2.</p>
+
+<h2>1. Goal</h2>
+<p>In A3 you wrote a mock server for the action <code>/execute</code>: it received "unstack F W" and pretended to do it in four phases. Now it does it. The server of this lesson speaks the same action, so the client of A3 works with it unchanged, but behind it are the estimator of D1 (the state of the world) and the pick-and-place of D2 (the motion). At the end you will have:</p>
+<ul>
+<li>three skills, <code>unstack X Y</code>, <code>stack X Y</code> and <code>putdown X</code>, each with <strong>conditions</strong> checked against the symbolic state before anything moves,</li>
+<li>the server of A3's action, <code>/execute</code>, that turns a skill into a goal for <code>/pick_place</code>,</li>
+<li>a plan runner in Python and in C++ that runs a list of skills, and stops at the first failure,</li>
+<li>a plan that swaps two blocks of a tower, run end to end in the simulator, and read back from <code>/towers</code>.</li>
+</ul>
+<div class="callout warn"><strong class="t">Remember the grip</strong>
+<p>As in D2, the blocks here are static models and a carried block is moved with <code>set_pose</code>: the arm moves for real, the grip is simulated. Everything else on this page (the state, the conditions, the plan) does not depend on that.</p></div>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>Run in the course container, Gazebo headless: every command of the page, with the server in Python and the plan runners in Python and in C++, one swap plan of four actions and one reversal of a tower. The server has no C++ version, cancelling an action is not supported, and the real arm was not tried.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>Three layers</h3>
+<figure>
+<svg viewBox="0 0 760 330" role="img" aria-label="layers: plan, execute server, pick place server, controllers, with the estimator feeding the execute server" style="max-width:100%;height:auto">
+<defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+<g font-family="system-ui,sans-serif" font-size="14" fill="var(--fg)">
+<rect x="20" y="15" width="330" height="50" rx="8" fill="var(--out-bg)" stroke="var(--line)" stroke-width="2"/>
+<text x="185" y="38" text-anchor="middle" font-weight="700">a plan (run_plan)</text>
+<text x="185" y="56" text-anchor="middle" fill="var(--muted)" font-size="12">unstack B C; unstack C D; stack B D ...</text>
+<rect x="20" y="95" width="330" height="55" rx="8" fill="var(--note)" stroke="var(--note-line)" stroke-width="2"/>
+<text x="185" y="118" text-anchor="middle" font-weight="700">/execute  (D3, action of A3)</text>
+<text x="185" y="138" text-anchor="middle" fill="var(--muted)" font-size="12">conditions, target place</text>
+<rect x="20" y="180" width="330" height="55" rx="8" fill="var(--note)" stroke="var(--note-line)" stroke-width="2"/>
+<text x="185" y="203" text-anchor="middle" font-weight="700">/pick_place  (D2)</text>
+<text x="185" y="223" text-anchor="middle" fill="var(--muted)" font-size="12">straight lines, 9 stages</text>
+<rect x="20" y="265" width="330" height="50" rx="8" fill="var(--ok)" stroke="var(--ok-line)" stroke-width="2"/>
+<text x="185" y="287" text-anchor="middle" font-weight="700">joint_trajectory_controller, gripper</text>
+<text x="185" y="305" text-anchor="middle" fill="var(--muted)" font-size="12">the simulated arm in Gazebo</text>
+<line x1="185" y1="65" x2="185" y2="93" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar3)"/>
+<line x1="185" y1="150" x2="185" y2="178" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar3)"/>
+<line x1="185" y1="235" x2="185" y2="263" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar3)"/>
+<rect x="450" y="95" width="290" height="55" rx="8" fill="var(--note)" stroke="var(--note-line)" stroke-width="2"/>
+<text x="595" y="118" text-anchor="middle" font-weight="700">/towers  (D1)</text>
+<text x="595" y="138" text-anchor="middle" fill="var(--muted)" font-size="12">"A | DCB"  (the symbolic state)</text>
+<line x1="450" y1="122" x2="352" y2="122" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar3)"/>
+<rect x="450" y="265" width="290" height="50" rx="8" fill="var(--out-bg)" stroke="var(--line)" stroke-width="2"/>
+<text x="595" y="287" text-anchor="middle" font-weight="700">Gazebo: block poses</text>
+<text x="595" y="305" text-anchor="middle" fill="var(--muted)" font-size="12">/model/block_X/pose</text>
+<line x1="595" y1="263" x2="595" y2="152" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar3)"/>
+<line x1="450" y1="292" x2="352" y2="212" stroke="var(--fg)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar3)"/>
+</g></svg>
+<figcaption>The conditions are checked against the symbolic state (<code>/towers</code>, D1) that comes from the poses. The target position also needs the poses (dashed). The motion is left to <code>/pick_place</code>.</figcaption></figure>
+
+<h3>Conditions and effects</h3>
+<p>A symbolic action is only meaningful in some states: you cannot unstack a block that is not on top, or stack on a block that already has one on it. Each skill states what must be true before, and what will be true after. The table below is the whole definition:</p>
+<table>
+<tr><th>Skill</th><th>Needs (before)</th><th>Result (after)</th></tr>
+<tr><td><code>unstack X Y</code></td><td>X is the top block of a tower, directly on Y</td><td>X alone on a free place of the table</td></tr>
+<tr><td><code>putdown X</code></td><td>X is the top block of a tower of two or more</td><td>X alone on a free place of the table</td></tr>
+<tr><td><code>stack X Y</code></td><td>X is alone on the table; Y is the top of a tower with fewer than three blocks</td><td>X on top of Y</td></tr>
+</table>
+<p>Every skill also needs <code>held</code> to be empty: no block in the air, that is, the arm is still. The conditions look at the symbolic state only, the sentence of D1 (for example <code>A | DCB</code>), not at numbers.</p>
+<p>The limit of three blocks comes from the reach of the hand (D2). It is a physical fact written into the conditions, so that the plan is refused here and not half-done by the arm.</p>
+
+<h3>Why not <code>pickup</code></h3>
+<p>The classical blocks world has four actions, with the hand holding a block between two of them: <code>pickup X</code> and <code>putdown X</code>, <code>unstack X Y</code> and <code>stack X Y</code>. That needs the state "the hand holds X", and a pick-and-place that can stop in the middle. Here a skill is a complete pick and place, as in the mock of A3 (approach, grasp, lift, place were one action): the hand is empty before and after. So <code>unstack X Y</code> includes putting X down on the table, and <code>putdown X</code> is the same movement when you do not need to name the block below. <code>pickup X</code> alone is refused with a message that says so.</p>
+
+<h3>Where to put a block down</h3>
+<p>On the table there are four places, the four in the lab: x = 0.50 and y = −0.18, −0.06, 0.06, 0.18. A place is free if no block is within 4 cm of it. The skill chooses the free place closest to where the block is (the shortest move), computed from the block poses.</p>
+
+<h3>The same action as in A3</h3>
+<p>The goal is <code>name</code> and <code>args</code> (<code>unstack</code>, <code>[B, C]</code>), the feedback is a <code>phase</code> and a <code>progress</code> (0 to 1), the result a <code>success</code> and a <code>message</code>. The server passes on the nine stages of <code>/pick_place</code> as the phases, with the progress k/9. A failed condition is a result with <code>success: false</code> and the reason in <code>message</code>.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span> This lesson needs the packages of A3 (the action), C2, C3, D1 and D2 built; the order matters, because a package must be sourced before the next one is built:</p>
+<pre class="cmd"><code>for p in c2-sim c3-world 03-actions d1-towers d2-pickplace; do source code/$p/install/setup.bash; done
+cd code/d3-skills
+colcon build
+cd ../..
+source code/d3-skills/install/setup.bash</code></pre>
+<p>If a package is missing, build it first, as in its own lesson (A3: <code>cd code/03-actions; colcon build</code>). In every other terminal of this lesson, run the first and the last line: the <code>for</code> line, and <code>source code/d3-skills/install/setup.bash</code>.</p>
+</li>
+
+<li>
+<h3>Start the four programs</h3>
+<p>Four terminals, each in the <code>ros2-tutorial</code> folder, each entered with <code>docker/run_ros2.sh</code> and with the sourcing of step 1. The order is the order of the layers:</p>
+<p><span class="where box">container</span> T1, the lab with static blocks (add <code>gui:=false</code> without a display):</p>
+<pre class="cmd"><code>ros2 launch c3_world lab_arm.launch.py static_blocks:=true</code></pre>
+<p>T2, the pick-and-place server of D2:</p>
+<pre class="cmd"><code>ros2 run d2_pickplace pick_place_server.py</code></pre>
+<p>T3, the estimator of D1:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run d1_towers towers.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run d1_towers towers</code></pre></div>
+<p>T4, the skills server of this lesson:</p>
+<pre class="cmd"><code>ros2 run d3_skills execute_server.py</code></pre>
+<pre class="out">[INFO] [...] [skills]: skills are ready: unstack X Y, stack X Y, putdown X</pre>
+<p>Wait about 30 s after T1 for the simulator, so that T2 and T3 find the arm and the blocks. T3 prints <code>A | B | C | D</code>.</p>
+</li>
+
+<li>
+<h3>The skills server</h3>
+<pre class="src" data-file="code/d3-skills/py/execute_server.py"><code>#!/usr/bin/env python3
+"""Action server /execute: the symbolic actions of the blocks world, carried out by the arm.
+
+It speaks the Execute action of lesson A3 (name + args), so the clients of A3 work with it. Three skills:
+
+  unstack X Y   X is on top of Y: put X on the table
+  stack X Y     X is alone on the table, Y is the top of a tower: put X on Y
+  putdown X     X is on top of a tower: put X on the table
+
+Each skill first checks its conditions against the symbolic state (/towers, lesson D1) and refuses if they do not
+hold. Then it works out where the block must go and asks /pick_place (lesson D2) to move it."""
+import time
+
+import rclpy
+from a3_interfaces.action import Execute
+from d2_interfaces.action import PickPlace
+from geometry_msgs.msg import PoseStamped
+from rclpy.action import ActionClient, ActionServer
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import String
+
+BLOCKS = "ABCD"
+SIZE = 0.05
+ON_TABLE_Z = 0.325                       # centre of a block on the table
+SLOT_X = 0.5
+SLOTS_Y = [-0.18, -0.06, 0.06, 0.18]     # the four places on the table where a block can be put down
+MAX_HEIGHT = 3                           # the hand cannot reach the fourth level (lesson D2)
+STAGES = ["open", "above", "descend", "grasp", "lift", "transit", "lower", "release", "retreat"]
+
+
+def parse(text):
+    """'A | CB | D   held: B' -&gt; (['A', 'CB', 'D'], ['B']): the towers bottom to top, and the blocks in the air."""
+    towers_part, _, held_part = text.partition("held:")
+    towers = [t.strip() for t in towers_part.split("|") if t.strip()]
+    return towers, held_part.split()
+
+
+class Skills(Node):
+    def __init__(self):
+        super().__init__("skills")
+        group = ReentrantCallbackGroup()
+        self.towers, self.held = [], []
+        self.pos = {}
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, "/towers", self.on_towers, latched, callback_group=group)
+        for k in BLOCKS:
+            self.create_subscription(PoseStamped, f"/model/block_{k}/pose",
+                                     lambda m, k=k: self.pos.__setitem__(k, (m.pose.position.x, m.pose.position.y, m.pose.position.z)),
+                                     10, callback_group=group)
+        self.pick_place = ActionClient(self, PickPlace, "pick_place", callback_group=group)
+        self.server = ActionServer(self, Execute, "execute", execute_callback=self.execute, callback_group=group)
+        self.get_logger().info("skills are ready: unstack X Y, stack X Y, putdown X")
+
+    def on_towers(self, msg):
+        self.towers, self.held = parse(msg.data)
+
+    # ---- the conditions and the target of each skill ----------------------------------------------------------
+    def tower_of(self, block):
+        return next((t for t in self.towers if block in t), None)
+
+    def free_slot(self, near_y):
+        """The place on the table, free of blocks, that is closest to y = near_y."""
+        free = [y for y in SLOTS_Y
+                if all(abs(self.pos[b][1] - y) &gt; 0.04 or abs(self.pos[b][0] - SLOT_X) &gt; 0.04 for b in BLOCKS)]
+        if not free:
+            raise ValueError("there is no free place on the table")
+        return min(free, key=lambda y: abs(y - near_y))
+
+    def plan(self, name, args):
+        """Check the conditions and return (block, x, y, z) for the pick-and-place, or raise ValueError."""
+        if self.held:
+            raise ValueError(f"block {self.held[0]} is in the air: wait until the arm is still")
+        if name == "unstack" and len(args) == 2:
+            x, y = args
+            tower = self.tower_of(x)
+            if tower is None or y not in tower:
+                raise ValueError(f"unstack {x} {y}: unknown block, or the blocks are not in a tower")
+            if tower.find(x) != tower.find(y) + 1 or not tower.endswith(x):
+                raise ValueError(f"unstack {x} {y}: {x} is not the top block directly on {y} (towers: {' | '.join(self.towers)})")
+            return x, SLOT_X, self.free_slot(self.pos[x][1]), ON_TABLE_Z
+        if name == "putdown" and len(args) == 1:
+            x = args[0]
+            tower = self.tower_of(x)
+            if tower is None:
+                raise ValueError(f"putdown {x}: unknown block")
+            if tower == x:
+                raise ValueError(f"putdown {x}: {x} is already on the table")
+            if not tower.endswith(x):
+                raise ValueError(f"putdown {x}: {x} is not at the top of its tower (towers: {' | '.join(self.towers)})")
+            return x, SLOT_X, self.free_slot(self.pos[x][1]), ON_TABLE_Z
+        if name == "stack" and len(args) == 2:
+            x, y = args
+            if x == y or x not in BLOCKS or y not in BLOCKS:
+                raise ValueError(f"stack {x} {y}: two different blocks of {BLOCKS} are needed")
+            if self.tower_of(x) != x:
+                raise ValueError(f"stack {x} {y}: {x} must be alone on the table (towers: {' | '.join(self.towers)})")
+            tower = self.tower_of(y)
+            if not tower.endswith(y):
+                raise ValueError(f"stack {x} {y}: {y} is not clear, there is a block on it (towers: {' | '.join(self.towers)})")
+            if len(tower) &gt;= MAX_HEIGHT:
+                raise ValueError(f"stack {x} {y}: the tower would be higher than {MAX_HEIGHT} blocks")
+            px, py, pz = self.pos[y]
+            return x, px, py, pz + SIZE
+        raise ValueError(f"'{name} {' '.join(args)}' is not a skill: use unstack X Y, stack X Y or putdown X")
+
+    # ---- the action -------------------------------------------------------------------------------------------
+    def execute(self, goal_handle):
+        name, args = goal_handle.request.name, list(goal_handle.request.args)
+        text = f"{name} {' '.join(args)}"
+        self.get_logger().info(f"execute: {text}")
+
+        def finish(ok, message):
+            (goal_handle.succeed if ok else goal_handle.abort)()
+            self.get_logger().info(message)
+            return Execute.Result(success=ok, message=message)
+
+        try:
+            block, x, y, z = self.plan(name, args)
+        except ValueError as error:
+            return finish(False, str(error))
+        if not self.pick_place.wait_for_server(timeout_sec=5.0):
+            return finish(False, "no /pick_place server")
+
+        def relay(msg):                      # feedback of PickPlace -&gt; feedback of Execute
+            stage = msg.feedback.stage
+            progress = (STAGES.index(stage) + 1) / len(STAGES) if stage in STAGES else 0.0
+            goal_handle.publish_feedback(Execute.Feedback(phase=stage, progress=progress))
+
+        send = self.pick_place.send_goal_async(PickPlace.Goal(block=block, x=x, y=y, z=z), feedback_callback=relay)
+        while not send.done():                   # the executor's other threads complete the future
+            time.sleep(0.01)
+        handle = send.result()
+        if not handle.accepted:
+            return finish(False, "/pick_place refused the goal")
+        done = handle.get_result_async()
+        while not done.done():
+            time.sleep(0.05)
+        result = done.result().result
+        return finish(result.success, f"{text}: done" if result.success else f"{text}: {result.message}")
+
+
+def main():
+    rclpy.init()
+    node = Skills()
+    executor = MultiThreadedExecutor(num_threads=6)
+    executor.add_node(node)
+    executor.spin()
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+<ul>
+<li><code>plan</code> is the table of the Concepts as code: for each skill it checks the conditions on the towers (<code>self.towers</code>, from <code>/towers</code>) and returns the block and the target <code>(x, y, z)</code>, or raises a <code>ValueError</code> whose text becomes the <code>message</code> of a failed result.</li>
+<li>The target of <code>stack X Y</code> is Y's position plus one block height, from Y's pose. The target of the other two is <code>free_slot</code>, on the table.</li>
+<li><code>execute</code> then sends the goal to <code>/pick_place</code>, passes its feedback on, and waits for the result.</li>
+<li>The <code>/towers</code> subscription uses the same transient-local setting as the publisher (D1): the server knows the state at once when it starts.</li>
+</ul>
+</li>
+
+<li>
+<h3>The first skill, with the client of A3</h3>
+<p>Put C on D. In A3 the client was a program; the command line does the same. <span class="where box">container</span> T5 (a fifth terminal, with the sourcing):</p>
+<pre class="cmd"><code>ros2 action send_goal --feedback /execute a3_interfaces/action/Execute "{name: stack, args: [C, D]}"</code></pre>
+<pre class="out">Waiting for an action server to become available...
+Sending goal:
+     name: stack
+args:
+- C
+- D
+
+Goal accepted with ID: ...
+
+Feedback:
+    phase: open
+progress: 0.1111111119389534
+
+Feedback:
+    phase: above
+progress: 0.2222222238779068
+
+...
+
+Feedback:
+    phase: release
+progress: 0.8888888955116272
+
+Feedback:
+    phase: retreat
+progress: 1.0
+
+Result:
+    success: true
+message: 'stack C D: done'
+
+Goal finished with status: SUCCEEDED</pre>
+<p>The arm does the nine stages of D2 (it takes about 15 s) and T3 shows the state change: <code>A | B | D   held: C</code> while C is carried, then <code>A | B | DC</code>.</p>
+</li>
+
+<li>
+<h3>A plan</h3>
+<p>A plan is a list of skills. The runner sends them one after the other, stops at the first one that fails, and prints the state at the end. <span class="where box">container</span> T5:</p>
+<div class="lang py"><pre class="src" data-file="code/d3-skills/py/run_plan.py"><code>#!/usr/bin/env python3
+"""Run a plan, a list of symbolic actions separated by ';', one after the other, and stop at the first failure.
+
+  run_plan.py "stack C D; stack B C"
+"""
+import sys
+
+import rclpy
+from a3_interfaces.action import Execute
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import String
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit('usage: run_plan.py "unstack B C; stack B D"')
+    steps = [s.split() for s in sys.argv[1].split(";") if s.strip()]
+    rclpy.init()
+    node = Node("run_plan")
+    towers = {}
+    node.create_subscription(String, "/towers", lambda m: towers.update(text=m.data), 
+                             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    client = ActionClient(node, Execute, "execute")
+    if not client.wait_for_server(timeout_sec=10.0):
+        sys.exit("no /execute server: is execute_server.py running?")
+    ok = True
+    for step in steps:
+        goal = Execute.Goal(name=step[0], args=step[1:])
+        print(f"&gt; {' '.join(step)}")
+        send = client.send_goal_async(goal, feedback_callback=lambda m: None)
+        rclpy.spin_until_future_complete(node, send)
+        done = send.result().get_result_async()
+        rclpy.spin_until_future_complete(node, done)
+        result = done.result().result
+        print(f"  {'done' if result.success else 'FAILED: ' + result.message}")
+        if not result.success:
+            ok = False
+            break
+    for _ in range(20):                       # let the last /towers message arrive
+        rclpy.spin_once(node, timeout_sec=0.1)
+    print("towers: " + towers.get("text", "?"))
+    node.destroy_node()
+    rclpy.shutdown()
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()</code></pre></div>
+<div class="lang cpp"><pre class="src" data-file="code/d3-skills/cpp/run_plan.cpp"><code>// Run a plan, a list of symbolic actions separated by ';', one after the other, and stop at the first failure.
+//   run_plan "stack C D; stack B C"
+#include &lt;chrono&gt;
+#include &lt;cstdio&gt;
+#include &lt;memory&gt;
+#include &lt;sstream&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;a3_interfaces/action/execute.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;rclcpp_action/rclcpp_action.hpp&gt;
+#include &lt;std_msgs/msg/string.hpp&gt;
+
+using Execute = a3_interfaces::action::Execute;
+using namespace std::chrono_literals;
+
+static std::vector&lt;std::string&gt; split(const std::string &amp;text, char sep) {
+  std::vector&lt;std::string&gt; out;
+  std::stringstream stream(text);
+  std::string item;
+  while (std::getline(stream, item, sep)) out.push_back(item);
+  return out;
+}
+
+int main(int argc, char **argv) {
+  if (argc != 2) {
+    std::fprintf(stderr, "usage: run_plan \"unstack B C; stack B D\"\n");
+    return 2;
+  }
+  rclcpp::init(argc, argv);
+  auto node = rclcpp::Node::make_shared("run_plan");
+  std::string towers = "?";
+  auto sub = node-&gt;create_subscription&lt;std_msgs::msg::String&gt;(
+      "/towers", rclcpp::QoS(1).transient_local(),
+      [&amp;towers](const std_msgs::msg::String::SharedPtr msg) { towers = msg-&gt;data; });
+  auto client = rclcpp_action::create_client&lt;Execute&gt;(node, "execute");
+  if (!client-&gt;wait_for_action_server(10s)) {
+    std::fprintf(stderr, "no /execute server: is execute_server.py running?\n");
+    return 1;
+  }
+  bool ok = true;
+  for (const auto &amp;text : split(argv[1], ';')) {
+    std::vector&lt;std::string&gt; words;
+    std::stringstream stream(text);
+    std::string word;
+    while (stream &gt;&gt; word) words.push_back(word);
+    if (words.empty()) continue;
+    Execute::Goal goal;
+    goal.name = words[0];
+    goal.args.assign(words.begin() + 1, words.end());
+    std::printf("&gt; %s\n", [&amp;] { std::string t = goal.name; for (const auto &amp;a : goal.args) t += " " + a; return t; }().c_str());
+    auto handle_future = client-&gt;async_send_goal(goal);
+    if (rclcpp::spin_until_future_complete(node, handle_future) != rclcpp::FutureReturnCode::SUCCESS) return 1;
+    auto result_future = client-&gt;async_get_result(handle_future.get());
+    if (rclcpp::spin_until_future_complete(node, result_future) != rclcpp::FutureReturnCode::SUCCESS) return 1;
+    const auto result = result_future.get().result;
+    std::printf("  %s%s\n", result-&gt;success ? "done" : "FAILED: ", result-&gt;success ? "" : result-&gt;message.c_str());
+    if (!result-&gt;success) { ok = false; break; }
+  }
+  rclcpp::spin_some(node);
+  std::printf("towers: %s\n", towers.c_str());
+  rclcpp::shutdown();
+  return ok ? 0 : 1;
+}</code></pre></div>
+<div class="lang py"><pre class="cmd"><code>ros2 run d3_skills run_plan.py "stack B C"</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run d3_skills run_plan "stack B C"</code></pre></div>
+<pre class="out">> stack B C
+  done
+towers: A | DCB</pre>
+<p>A tower of three: D, C and B (bottom to top), and A alone.</p>
+</li>
+
+<li>
+<h3>Refusals</h3>
+<p>Each of these breaks a condition, and each is refused with no motion at all (the arm stays still and the state does not change). <span class="where box">container</span> T5:</p>
+<pre class="cmd"><code>ros2 run d3_skills run_plan.py "stack A C"
+ros2 run d3_skills run_plan.py "unstack C B"
+ros2 run d3_skills run_plan.py "pickup A"
+ros2 run d3_skills run_plan.py "putdown A"
+ros2 run d3_skills run_plan.py "stack A B"</code></pre>
+<pre class="out">> stack A C
+  FAILED: stack A C: C is not clear, there is a block on it (towers: A | DCB)
+towers: A | DCB
+> unstack C B
+  FAILED: unstack C B: C is not the top block directly on B (towers: A | DCB)
+towers: A | DCB
+> pickup A
+  FAILED: 'pickup A' is not a skill: use unstack X Y, stack X Y or putdown X
+towers: A | DCB
+> putdown A
+  FAILED: putdown A: A is already on the table
+towers: A | DCB
+> stack A B
+  FAILED: stack A B: the tower would be higher than 3 blocks
+towers: A | DCB</pre>
+<p>(Each also prints <code>towers: A | DCB</code> and a line from <code>ros2 run</code> about the exit code: a plan that fails exits with 1.) Read the reasons: C has a block on it; C is not on B; <code>pickup</code> is not a skill here; A is already on the table; and the tower D C B is already three blocks high.</p>
+</li>
+
+<li>
+<h3>Swap two blocks</h3>
+<p>The tower is D, C, B. Swap B and C: take B off, take C off, put B on D, put C on B. Four skills; this time with the runner of the other language, if you used one before. The whole plan takes about a minute and a half. <span class="where box">container</span> T5:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run d3_skills run_plan.py "unstack B C; unstack C D; stack B D; stack C B"</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run d3_skills run_plan "unstack B C; unstack C D; stack B D; stack C B"</code></pre></div>
+<pre class="out">> unstack B C
+  done
+> unstack C D
+  done
+> stack B D
+  done
+> stack C B
+  done
+towers: A | DBC</pre>
+<p>T3 follows every motion:</p>
+<pre class="out">A | DCB
+A | DC   held: B
+A | B | DC
+A | B | D   held: C
+A | B | C | D
+A | C | D   held: B
+A | C | DB
+A | DB   held: C
+A | DBC</pre>
+<p>Read it (the estimator prints a line only when the sentence changes, so a few intermediate lines are missing here and the exact set depends on when the pose messages arrive): B goes to the free place of the table nearest to the tower (y = 0.06), C to the next free place (y = −0.06), then B goes on D and C on B. Check the heights, from the simulator:</p>
+<pre class="cmd"><code>for b in A B C D; do echo -n "$b "; gz model -m block_$b -p | sed -n '/Pose/,+1p' | tail -1; done</code></pre>
+<pre class="out">A     [0.500000 -0.180000 0.325000]
+B     [0.500000 0.180000 0.375000]
+C     [0.500000 0.180000 0.425000]
+D     [0.500000 0.180000 0.325000]</pre>
+<p>D is on the table (0.325), B on D (0.375), C on B (0.425): the tower is D, B, C.</p>
+</li>
+</ol>
+
+<h2>4. Check</h2>
+<ul>
+<li><code>stack C D</code> gave <code>success: true</code> and T3 showed <code>DC</code>.</li>
+<li>All five refusals came back as <code>FAILED</code> with a reason, and no block moved.</li>
+<li>The swap plan ran four skills and <code>towers: A | DBC</code> at the end.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>The tower is now D, B, C. Write a plan that reverses it, to D, C, B, and run it.</p>
+<details>
+<summary>Answer</summary>
+<pre class="cmd"><code>ros2 run d3_skills run_plan.py "unstack C B; unstack B D; stack C D; stack B C"</code></pre>
+<pre class="out">> unstack C B
+  done
+> unstack B D
+  done
+> stack C D
+  done
+> stack B C
+  done
+towers: A | DCB</pre>
+<p>C comes off first (it is on top), then B; then they are stacked back in the other order. The plan has four skills, as the swap had; in general a tower of three needs four moves to be reversed (two blocks have to leave the tower and go back, one after the other). The final state, read from <code>/towers</code>, is <code>A | DCB</code>.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A <strong>skill</strong> is a symbolic action with <strong>conditions</strong> (checked against the symbolic state) and an <strong>effect</strong>. Checking first means a bad plan is refused with the reason, before the arm moves.</li>
+<li>Three layers: a plan (symbols), <code>/execute</code> (conditions and targets), <code>/pick_place</code> (motion), with the estimator closing the loop through <code>/towers</code>.</li>
+<li>The server uses the action of A3 unchanged; the feedback carries the stages of D2.</li>
+<li>Skills here are whole pick-and-place moves, so there is no <code>pickup</code>; towers are at most three blocks high; a free place on the table is chosen by distance.</li>
+<li>A plan runner (Python and C++) runs the skills in order and stops at the first failure.</li>
+<li>Not covered: planning (finding the list of skills for a goal, Part E), cancelling, a real grip (D2), the C++ server.</li>
+</ul>
+
+<nav class="pager">
+<a href="d2-pick-and-place.html"><small>Previous</small>D2 · Pick and place</a>
+<a class="next" href="index.html"><small>Contents</small>Back to the lessons</a>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

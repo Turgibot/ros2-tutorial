@@ -43,8 +43,9 @@ def launch_setup(context, *args, **kwargs):
                                    flags=re.S)
 
     # Gazebo: -r runs at once, -s is the server only (no window; --headless-rendering lets cameras render without a display)
+    engine = LaunchConfiguration("physics_engine").perform(context)
     gz_args = "-r -v 3 " + ("" if gui == "true" else "-s --headless-rendering ") + world + \
-        " --physics-engine gz-physics-bullet-featherstone-plugin"
+        (f" --physics-engine {engine}" if engine not in ("", "default") else "")
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([FindPackageShare("ros_gz_sim"), "/launch/gz_sim.launch.py"]),
         launch_arguments={"gz_args": gz_args}.items())
@@ -91,6 +92,8 @@ def generate_launch_description():
         DeclareLaunchArgument("vision", default_value="false", description="true: add the wrist camera (a Realsense) to the arm"),
         DeclareLaunchArgument("sensors_in_world", default_value="false",
                               description="true if the world file already has the Sensors system (the C3 lab does)"),
+        DeclareLaunchArgument("physics_engine", default_value="gz-physics-bullet-featherstone-plugin",
+                              description='physics engine plugin; "default" is the default of Gazebo (DART)'),
         DeclareLaunchArgument("launch_rviz", default_value="false"),
     ]
     return LaunchDescription(args + [OpaqueFunction(function=launch_setup)])

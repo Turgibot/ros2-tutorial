@@ -77,15 +77,16 @@ source install/setup.bash</code></pre>
 <pre class="src" data-file="code/c3-world/launch/lab_arm.launch.py"><code>"""The lab world (C3) with the Gen3 standing at its origin (C2), and bridges for the cameras and the block poses.
 Arguments: gui (Gazebo window), vision (add the wrist camera to the arm)."""
 import os
+import tempfile
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
+def launch_setup(context, *args, **kwargs):
     lab = get_package_share_directory("c3_world")
     sim = os.path.join(get_package_share_directory("c2_sim"), "launch", "sim.launch.py")
 
@@ -96,21 +97,41 @@ def generate_launch_description():
                    "/wrist_mounted_camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image",
                    "/wrist_mounted_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"]
     bridge_args += [f"/model/block_{k}/pose@geometry_msgs/msg/PoseStamped[gz.msgs.Pose" for k in "ABCD"]
+    # the service that moves a model (used in D2 to carry a block with the hand)
+    bridge_args += ["/world/lab/set_pose@ros_gz_interfaces/srv/SetEntityPose"]
 
-    return LaunchDescription([
-        DeclareLaunchArgument("gui", default_value="true"),
-        DeclareLaunchArgument("vision", default_value="false"),
+    world = os.path.join(lab, "worlds", "lab.sdf")
+    if LaunchConfiguration("static_blocks").perform(context) == "true":
+        # D2 and D3: the blocks are static models, moved only by set_pose (see lesson D2). The world file is the
+        # same, with &lt;static&gt;true&lt;/static&gt; added to every &lt;include&gt;.
+        text = open(world).read().replace("&lt;/include&gt;", "  &lt;static&gt;true&lt;/static&gt;\n    &lt;/include&gt;")
+        world = os.path.join(tempfile.gettempdir(), "lab_static.sdf")
+        open(world, "w").write(text)
+
+    return [
         AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.path.join(lab, "models")),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(sim),
-            launch_arguments={"world": os.path.join(lab, "worlds", "lab.sdf"),
+            launch_arguments={"world": world,
                               "gui": LaunchConfiguration("gui"),
                               "vision": LaunchConfiguration("vision"),
-                              "sensors_in_world": "true"}.items()),
+                              "sensors_in_world": "true",
+                              "physics_engine": LaunchConfiguration("physics_engine")}.items()),
         Node(package="ros_gz_bridge", executable="parameter_bridge", output="screen",
              parameters=[{"use_sim_time": True}], arguments=bridge_args),
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument("gui", default_value="true"),
+        DeclareLaunchArgument("vision", default_value="false"),
+        DeclareLaunchArgument("physics_engine", default_value="gz-physics-bullet-featherstone-plugin"),
+        DeclareLaunchArgument("static_blocks", default_value="false", description="true: blocks that only set_pose moves (D2)"),
+        OpaqueFunction(function=launch_setup),
     ])</code></pre>
 <p>It includes the launch file of C2 with the lab world, and adds a bridge for three cameras and the four block poses. Two arguments go to the C2 file that did not exist in C2: <code>vision</code> adds a camera (a Realsense) to the arm's wrist, and <code>sensors_in_world</code> tells it that the world already has the <code>Sensors</code> system (the camera renderer), so that it must remove the one the robot description would add. Gazebo can have only one: with two the simulator aborts with an <code>Ogre::ItemIdentityException</code> ("HLMS Datablock already exists"), which is what happened when I first combined them.</p>
+<p>(The file has three more arguments, <code>static_blocks</code>, <code>physics_engine</code> and a bridge for the world's <code>set_pose</code> service. They are for D2; leave them at their defaults here.)</p>
 <p><span class="where box">container</span> T1:</p>
 <pre class="cmd"><code>ros2 launch c3_world lab_arm.launch.py vision:=true</code></pre>
 <p>This opens the Gazebo window (<code>gui:=true</code> is the default, as in C2). Add <code>gui:=false</code> if there is no display. Wait about 30 s. The ground, the table, the blocks, the two cameras and the arm (<code>gen3</code>) are in the world.</p>
@@ -400,7 +421,7 @@ ros2 run c3_world pixel_to_table.py B</code></pre>
 
 <nav class="pager">
 <a href="c3-table-and-blocks.html"><small>Previous</small>C3 · A table and lettered blocks</a>
-<a class="next" href="c5-moveit-in-gazebo.html"><small>Next</small>C5 · MoveIt with the simulated arm</a>
+<span class="soon next"><small>Next</small>C5 · MoveIt with Gazebo (coming soon)</span>
 </nav>
 </main>
 <footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
