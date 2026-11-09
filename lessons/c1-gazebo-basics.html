@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C1 · Gazebo basics</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part C · Simulation with Gazebo</span></header>
+<main>
+
+<h1>C1 · Gazebo basics</h1>
+<p class="lead">A physics simulator of your own: a world in a file, a box that falls, and a bridge that brings its state into ROS 2.</p>
+
+<h2>1. Goal</h2>
+<p>Until now the arm was "fake hardware": a program that repeats every command back as if it had moved. Nothing has mass, nothing can fall, and nothing collides. Gazebo is a <strong>physics simulator</strong>: it computes forces, contacts and motion, step by step. The digital twin of the course (Part C and D) is a Gen3 arm in Gazebo.</p>
+<p>Before the arm, this lesson uses the simplest possible world, so that every piece is visible. At the end you will have:</p>
+<ul>
+<li>written a world file (SDF) with a ground and a falling box,</li>
+<li>run Gazebo without a window (<em>headless</em>) and paused,</li>
+<li>pressed play, pause and step from the command line,</li>
+<li>bridged the box's pose and the clock into ROS 2 with <code>ros_gz_bridge</code>,</li>
+<li>and checked the simulator against a formula from school physics.</li>
+</ul>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>Everything on this page was run in the course container, with Gazebo running headless (no window). The Gazebo window (<code>gz sim -g</code>) was started and stayed up for 12 s with no error, but nobody looked at it, so the lesson has no screenshot of it, and says nothing about how it looks.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>Gazebo, <code>gz</code> and the version</h3>
+<p>The simulator in the image is <strong>Gazebo Harmonic</strong>: the command is <code>gz</code>, and the program is <code>gz sim</code> (version 8.15 here). Older tutorials talk about "Gazebo Classic" and the command <code>gazebo</code>: that is a different program, and its files do not work here.</p>
+
+<h3>A world is a file</h3>
+<p>A <strong>world</strong> is an XML file in the SDF format (Simulation Description Format). It lists the physics settings, the lights, and the <strong>models</strong>. A model is made of <strong>links</strong> (rigid bodies) and joints. A link has three parts, and they are separate on purpose:</p>
+<ul>
+<li><code>inertial</code>: the mass and the inertia (how hard it is to push and to spin),</li>
+<li><code>collision</code>: the shape used for contacts (as simple as possible, for speed),</li>
+<li><code>visual</code>: the shape and the colour you see (as nice as you like).</li>
+</ul>
+<p>This is the same idea as the URDF of B1, with one difference: URDF describes a robot, SDF describes a whole world.</p>
+
+<h3>Systems (plugins)</h3>
+<p>An empty SDF world does nothing: not even physics. Each ability is a <strong>system</strong> plugin that you list in the world: <code>Physics</code> moves the bodies, <code>UserCommands</code> lets you create and move models and control time, <code>SceneBroadcaster</code> tells a window what to draw. A system can also be placed inside a model: below, one makes the box publish its pose.</p>
+
+<h3>Server and window</h3>
+<p><code>gz sim</code> is two programs: the <strong>server</strong> (the physics, <code>-s</code>) and the <strong>GUI</strong> (the window, <code>-g</code>). By default one command starts both. Here only the server runs, and the GUI can join later from any terminal. This matters because the course containers often run without a display.</p>
+
+<h3>Two message systems, and a bridge</h3>
+<p>Gazebo does not use ROS 2 inside. It has its own topics and services (<code>gz topic</code>, <code>gz service</code>) with its own message types (<code>gz.msgs.Pose</code>). The program <code>ros_gz_bridge</code> copies a chosen topic from one side to the other, converting the type. You tell it with a string:</p>
+<pre class="math">/model/box/pose @ geometry_msgs/msg/PoseStamped [ gz.msgs.Pose
+  topic name         ROS 2 type                    ^   Gazebo type
+                                                   '-- "[": from Gazebo to ROS 2   "]": ROS 2 to Gazebo   "@": both ways</pre>
+
+<figure>
+<svg viewBox="0 0 760 250" role="img" aria-label="gz sim server connected by gz topics to ros_gz_bridge, then by ROS 2 topics to your nodes" style="max-width:100%;height:auto">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+<g font-family="system-ui,sans-serif" font-size="14" fill="var(--fg)">
+<rect x="10" y="20" width="200" height="130" rx="10" fill="var(--note)" stroke="var(--note-line)" stroke-width="2"/>
+<text x="110" y="46" text-anchor="middle" font-weight="700">gz sim (server)</text>
+<text x="110" y="72" text-anchor="middle">hello.sdf: ground, box</text>
+<text x="110" y="94" text-anchor="middle">Physics system</text>
+<text x="110" y="116" text-anchor="middle">PosePublisher in the box</text>
+<text x="110" y="138" text-anchor="middle" fill="var(--muted)" font-size="12">1 step = 1 ms of simulated time</text>
+<rect x="280" y="20" width="200" height="130" rx="10" fill="var(--ok)" stroke="var(--ok-line)" stroke-width="2"/>
+<text x="380" y="46" text-anchor="middle" font-weight="700">ros_gz_bridge</text>
+<text x="380" y="72" text-anchor="middle">/clock</text>
+<text x="380" y="94" text-anchor="middle">/model/box/pose</text>
+<text x="380" y="116" text-anchor="middle">/world/hello/control</text>
+<text x="380" y="138" text-anchor="middle" fill="var(--muted)" font-size="12">converts the message types</text>
+<rect x="550" y="20" width="200" height="130" rx="10" fill="var(--out-bg)" stroke="var(--line)" stroke-width="2"/>
+<text x="650" y="46" text-anchor="middle" font-weight="700">ROS 2 side</text>
+<text x="650" y="72" text-anchor="middle">box_height (your node)</text>
+<text x="650" y="94" text-anchor="middle">ros2 topic echo</text>
+<text x="650" y="116" text-anchor="middle">ros2 service call</text>
+<line x1="212" y1="85" x2="278" y2="85" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar)" marker-start="url(#ar)"/>
+<line x1="482" y1="85" x2="548" y2="85" stroke="var(--fg)" stroke-width="2" marker-end="url(#ar)" marker-start="url(#ar)"/>
+<text x="245" y="172" text-anchor="middle" fill="var(--muted)" font-size="13">gz topics</text>
+<text x="515" y="172" text-anchor="middle" fill="var(--muted)" font-size="13">ROS 2 topics</text>
+<text x="380" y="215" text-anchor="middle" fill="var(--muted)" font-size="13">The same pose message exists twice, once on each side; the bridge keeps the copies in step.</text>
+</g></svg>
+<figcaption>The pieces of this lesson. Both arrows are two-way because the bridge can carry topics and services in either direction.</figcaption></figure>
+
+<h3>Simulated time</h3>
+<p>Simulated time is not wall-clock time. Gazebo advances it in steps of <code>max_step_size</code> (1 ms here), and publishes it on <code>/clock</code>. When paused, it stands still. ROS 2 nodes can follow it with the parameter <code>use_sim_time:=true</code>; the arm in C2 does.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build the package</h3>
+<p>The package <code>code/c1-gazebo</code> holds the world, a launch file and one program in Python and in C++, <code>box_height</code>.</p>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>cd code/c1-gazebo
+colcon build
+source install/setup.bash</code></pre>
+<p>The build ends with <code>Finished &lt;&lt;&lt; c1_gazebo</code>.</p>
+</li>
+
+<li>
+<h3>Read the world</h3>
+<pre class="src" data-file="code/c1-gazebo/worlds/hello.sdf"><code>&lt;?xml version="1.0"?&gt;
+&lt;sdf version="1.9"&gt;
+  &lt;world name="hello"&gt;
+    &lt;physics name="1ms" type="ode"&gt;
+      &lt;max_step_size&gt;0.001&lt;/max_step_size&gt;
+      &lt;real_time_factor&gt;1.0&lt;/real_time_factor&gt;
+    &lt;/physics&gt;
+    &lt;plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/&gt;
+    &lt;plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/&gt;
+    &lt;plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/&gt;
+    &lt;gravity&gt;0 0 -9.81&lt;/gravity&gt;
+
+    &lt;light type="directional" name="sun"&gt;
+      &lt;cast_shadows&gt;true&lt;/cast_shadows&gt;
+      &lt;pose&gt;0 0 10 0 0 0&lt;/pose&gt;
+      &lt;direction&gt;-0.5 0.1 -0.9&lt;/direction&gt;
+      &lt;diffuse&gt;0.9 0.9 0.9 1&lt;/diffuse&gt;
+    &lt;/light&gt;
+
+    &lt;model name="ground"&gt;
+      &lt;static&gt;true&lt;/static&gt;
+      &lt;link name="link"&gt;
+        &lt;collision name="collision"&gt;
+          &lt;geometry&gt;&lt;plane&gt;&lt;normal&gt;0 0 1&lt;/normal&gt;&lt;size&gt;10 10&lt;/size&gt;&lt;/plane&gt;&lt;/geometry&gt;
+        &lt;/collision&gt;
+        &lt;visual name="visual"&gt;
+          &lt;geometry&gt;&lt;plane&gt;&lt;normal&gt;0 0 1&lt;/normal&gt;&lt;size&gt;10 10&lt;/size&gt;&lt;/plane&gt;&lt;/geometry&gt;
+          &lt;material&gt;&lt;ambient&gt;0.8 0.8 0.8 1&lt;/ambient&gt;&lt;diffuse&gt;0.8 0.8 0.8 1&lt;/diffuse&gt;&lt;/material&gt;
+        &lt;/visual&gt;
+      &lt;/link&gt;
+    &lt;/model&gt;
+
+    &lt;model name="box"&gt;
+      &lt;pose&gt;0 0 1.0 0 0 0&lt;/pose&gt;
+      &lt;!-- publish this model's pose on /model/box/pose --&gt;
+      &lt;plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher"&gt;
+        &lt;publish_model_pose&gt;true&lt;/publish_model_pose&gt;
+        &lt;publish_link_pose&gt;false&lt;/publish_link_pose&gt;
+        &lt;update_frequency&gt;50&lt;/update_frequency&gt;
+      &lt;/plugin&gt;
+      &lt;link name="link"&gt;
+        &lt;inertial&gt;
+          &lt;mass&gt;1.0&lt;/mass&gt;
+          &lt;inertia&gt;&lt;ixx&gt;0.0167&lt;/ixx&gt;&lt;iyy&gt;0.0167&lt;/iyy&gt;&lt;izz&gt;0.0167&lt;/izz&gt;&lt;ixy&gt;0&lt;/ixy&gt;&lt;ixz&gt;0&lt;/ixz&gt;&lt;iyz&gt;0&lt;/iyz&gt;&lt;/inertia&gt;
+        &lt;/inertial&gt;
+        &lt;collision name="collision"&gt;&lt;geometry&gt;&lt;box&gt;&lt;size&gt;0.2 0.2 0.2&lt;/size&gt;&lt;/box&gt;&lt;/geometry&gt;&lt;/collision&gt;
+        &lt;visual name="visual"&gt;
+          &lt;geometry&gt;&lt;box&gt;&lt;size&gt;0.2 0.2 0.2&lt;/size&gt;&lt;/box&gt;&lt;/geometry&gt;
+          &lt;material&gt;&lt;ambient&gt;0.8 0.1 0.1 1&lt;/ambient&gt;&lt;diffuse&gt;0.8 0.1 0.1 1&lt;/diffuse&gt;&lt;/material&gt;
+        &lt;/visual&gt;
+      &lt;/link&gt;
+    &lt;/model&gt;
+  &lt;/world&gt;
+&lt;/sdf&gt;</code></pre>
+<ul>
+<li><code>physics</code>: a step of 1 ms, run at real-time speed (<code>real_time_factor</code> 1). The physics engine is ODE.</li>
+<li>three <code>plugin</code> lines, the systems from the Concepts. Without the first, nothing would move.</li>
+<li><code>ground</code> is <code>static</code>: it never moves, and it has a collision and a visual but no mass. Its shape is a plane, 10 m by 10 m.</li>
+<li><code>box</code> starts 1 m above the ground. It is a cube of 0.2 m with a mass of 1 kg. Its inertia is 0.0167 kg·m² around each axis: for a cube, <code>m·s²/6</code> = 1 × 0.2² / 6.</li>
+<li>the <code>PosePublisher</code> plugin inside <code>box</code> publishes the pose of the model, 50 times per second of simulated time, on <code>/model/box/pose</code>.</li>
+</ul>
+</li>
+
+<li>
+<h3>Start Gazebo and the bridge</h3>
+<p>The launch file starts the server on the world file and the bridge for three things: the clock, the box pose, and the service that controls time. <span class="where box">container</span> T1:</p>
+<pre class="src" data-file="code/c1-gazebo/launch/hello.launch.py"><code>"""Gazebo server with the hello world (paused), plus the ros_gz bridge for /clock, the box pose (PoseStamped) and the world-control service."""
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    default_world = os.path.join(get_package_share_directory("c1_gazebo"), "worlds", "hello.sdf")
+    world = DeclareLaunchArgument("world_file", default_value=default_world)
+    # -s: server only (no window). No -r, so the world starts paused.
+    gz = ExecuteProcess(cmd=["gz", "sim", "-s", LaunchConfiguration("world_file")], output="screen")
+    bridge = Node(
+        package="ros_gz_bridge", executable="parameter_bridge", output="screen",
+        arguments=[
+            "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+            "/model/box/pose@geometry_msgs/msg/PoseStamped[gz.msgs.Pose",
+            "/world/hello/control@ros_gz_interfaces/srv/ControlWorld",
+        ])
+    return LaunchDescription([world, gz, bridge])</code></pre>
+<pre class="cmd"><code>ros2 launch c1_gazebo hello.launch.py</code></pre>
+<p>The bridge prints one line per bridged item (<code>Creating GZ-&gt;ROS Bridge</code> for the clock and the pose, <code>Creating ROS-&gt;GZ service bridge</code> for the control service). There is no window and no more output: the world is <strong>paused</strong>, because the launch file did not pass <code>-r</code> (run) to <code>gz sim</code>.</p>
+</li>
+
+<li>
+<h3>Look around from both sides</h3>
+<p>Open a second terminal, in the <code>ros2-tutorial</code> folder, and enter another container: this is <strong>T2</strong>.</p>
+<p class="env docker"><span class="where host">host</span></p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> T2: the Gazebo side first.</p>
+<pre class="cmd"><code>gz model --list
+gz model -m box -p</code></pre>
+<pre class="out">Available models:
+    - ground
+    - box
+
+Model: [8]
+  - Name: box
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [0.000000 0.000000 1.000000]
+    [0.000000 -0.000000 0.000000]</pre>
+<p>(Each command also prints a line, <code>Requesting state for world [hello]...</code>.) The box is at z = 1 m. Now the ROS 2 side:</p>
+<pre class="cmd"><code>ros2 topic list
+ros2 topic echo /clock --once</code></pre>
+<pre class="out">/clock
+/model/box/pose
+/parameter_events
+/rosout
+clock:
+  sec: 0
+  nanosec: 0
+---</pre>
+<p>Only what the bridge was told to carry is on the ROS 2 side: Gazebo has many more topics (<code>gz topic -l</code> lists them). The clock reads 0 and will keep reading 0: time is paused.</p>
+</li>
+
+<li>
+<h3>Watch the box fall</h3>
+<p>Here is the program that watches the box. It reads the bridged pose and prints the height every 0.1 s of <em>simulated</em> time, and when the box has landed.</p>
+<div class="lang py"><pre class="src" data-file="code/c1-gazebo/py/box_height.py"><code>#!/usr/bin/env python3
+"""Watch the pose of the model "box" that Gazebo publishes (bridged to ROS as geometry_msgs/PoseStamped)
+and print its height every 0.1 s of simulated time, and the moment it lands."""
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped
+
+GROUND_Z = 0.1        # the box is 0.2 m tall, so its centre is 0.1 m above the ground when it rests
+START_Z = 1.0         # where the world file puts the box
+
+
+class BoxHeight(Node):
+    def __init__(self):
+        super().__init__("box_height")
+        self.last_print = -1.0
+        self.landed = False
+        self.create_subscription(PoseStamped, "/model/box/pose", self.on_pose, 10)
+
+    def on_pose(self, msg):
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        z = msg.pose.position.z
+        if t - self.last_print &gt;= 0.1:
+            self.last_print = t
+            self.get_logger().info(f"t = {t:5.2f} s   z = {z:.3f} m")
+        if not self.landed and z &lt;= GROUND_Z + 0.001:
+            self.landed = True
+            self.get_logger().info(f"landed after {t:.3f} s of simulated time")
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(BoxHeight())
+
+
+if __name__ == "__main__":
+    main()</code></pre></div>
+<div class="lang cpp"><pre class="src" data-file="code/c1-gazebo/cpp/box_height.cpp"><code>// Watch the pose of the model "box" that Gazebo publishes (bridged to ROS as geometry_msgs/PoseStamped)
+// and print its height every 0.1 s of simulated time, and the moment it lands.
+#include &lt;cstdio&gt;
+#include &lt;memory&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;geometry_msgs/msg/pose_stamped.hpp&gt;
+
+const double GROUND_Z = 0.1;   // the box is 0.2 m tall, so its centre is 0.1 m above the ground when it rests
+
+class BoxHeight : public rclcpp::Node {
+public:
+  BoxHeight() : Node("box_height") {
+    sub_ = create_subscription&lt;geometry_msgs::msg::PoseStamped&gt;(
+        "/model/box/pose", 10,
+        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { on_pose(*msg); });
+  }
+
+private:
+  void on_pose(const geometry_msgs::msg::PoseStamped &amp;msg) {
+    double t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9;
+    double z = msg.pose.position.z;
+    if (t - last_print_ &gt;= 0.1) {
+      last_print_ = t;
+      RCLCPP_INFO(get_logger(), "t = %5.2f s   z = %.3f m", t, z);
+    }
+    if (!landed_ &amp;&amp; z &lt;= GROUND_Z + 0.001) {
+      landed_ = true;
+      RCLCPP_INFO(get_logger(), "landed after %.3f s of simulated time", t);
+    }
+  }
+
+  rclcpp::Subscription&lt;geometry_msgs::msg::PoseStamped&gt;::SharedPtr sub_;
+  double last_print_ = -1.0;
+  bool landed_ = false;
+};
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;BoxHeight&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre></div>
+<p>Open a third terminal and enter a container (<strong>T3</strong>, same two lines as before: <code>docker/run_ros2.sh</code> in a terminal in the folder), then start the program. It waits, because nothing is moving.</p>
+<div class="lang py"><pre class="cmd"><code>cd code/c1-gazebo
+source install/setup.bash
+ros2 run c1_gazebo box_height.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>cd code/c1-gazebo
+source install/setup.bash
+ros2 run c1_gazebo box_height</code></pre></div>
+<p>It prints nothing, even though the box pose is published, because the world is paused and a paused world publishes no new poses. Now press <strong>play</strong>: in T2, call the control service of the world.</p>
+<pre class="cmd"><code>ros2 service call /world/hello/control ros_gz_interfaces/srv/ControlWorld "{world_control: {pause: false}}"</code></pre>
+<p>T3 prints, one line per 0.1 s of simulated time:</p>
+<pre class="out">[INFO] [...] [box_height]: t =  0.02 s   z = 0.998 m
+[INFO] [...] [box_height]: t =  0.12 s   z = 0.929 m
+[INFO] [...] [box_height]: t =  0.24 s   z = 0.716 m
+[INFO] [...] [box_height]: t =  0.34 s   z = 0.431 m
+[INFO] [...] [box_height]: landed after 0.440 s of simulated time
+[INFO] [...] [box_height]: t =  0.46 s   z = 0.099 m
+[INFO] [...] [box_height]: t =  0.56 s   z = 0.100 m
+...</pre>
+<p>(The times and the wall-clock timestamps vary a little; the heights are what the physics gives. The first line may differ by one sample.) The box falls from 1.0 m and comes to rest with its centre at 0.100 m: half its height above the ground. Press Ctrl+C in T3 to stop the program.</p>
+</li>
+
+<li>
+<h3>Check the physics with a formula</h3>
+<p>A body falling from rest covers <code>h = ½·g·t²</code>. The box centre falls from 1.0 m to 0.1 m, so h = 0.9 m and</p>
+<pre class="math">t = sqrt( 2·h / g ) = sqrt( 2 × 0.9 / 9.81 ) = 0.428 s</pre>
+<p>The program says the box was at rest height by 0.44 s. Its samples come every 0.02 s (50 Hz), and 0.44 is the first sample after 0.428. The heights also fit: at t = 0.34 s the formula gives 1.0 − ½ × 9.81 × 0.34² = 0.433 m, and the program printed 0.431. The simulator and the formula agree: this is what "the twin follows physics" means.</p>
+</li>
+
+<li>
+<h3>Pause, step, and the clock</h3>
+<p>The world has been running since you pressed play, and the clock keeps counting. Check how fast, in T2:</p>
+<pre class="cmd"><code>ros2 topic hz /clock</code></pre>
+<pre class="out">average rate: 1000.201
+	min: 0.001s max: 0.001s std dev: 0.00002s window: 1002</pre>
+<p>1000 messages per second, one per 1 ms step: simulated time runs at the speed of real time. Press Ctrl+C, then pause, and read the clock twice:</p>
+<pre class="cmd"><code>ros2 service call /world/hello/control ros_gz_interfaces/srv/ControlWorld "{world_control: {pause: true}}"
+ros2 topic echo /clock --once
+ros2 topic echo /clock --once</code></pre>
+<p>Both reads show the same time (7.685 s in the test run; yours differs: it is however long the world ran). Now <strong>step</strong> 100 times (100 × 1 ms = 0.1 s) while paused:</p>
+<pre class="cmd"><code>ros2 service call /world/hello/control ros_gz_interfaces/srv/ControlWorld "{world_control: {pause: true, multi_step: 100}}"
+ros2 topic echo /clock --once</code></pre>
+<p>The clock moved forward by exactly 0.1 s (7.685 s to 7.785 s in the test run) and stopped again. Stepping is how a program can run the simulation at its own pace, for example to run it faster than real time or one control cycle at a time.</p>
+<div class="callout warn"><strong class="t">Careful: always say <code>pause: true</code> with a step</strong>
+<p>A <code>WorldControl</code> message has a field <code>pause</code> that is <code>false</code> unless you set it. <code>{multi_step: 100}</code> alone steps and then <strong>plays</strong>: the world runs on and the clock races away. This was tested: three such calls moved the clock by about 2 s each. Write <code>pause: true, multi_step: 100</code>.</p></div>
+<details>
+<summary>The same from Gazebo's own tools (no ROS 2)</summary>
+<p><span class="where box">container</span> T2. The bridge is not needed for these:</p>
+<pre class="cmd"><code>gz service -s /world/hello/control --reqtype gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 2000 --req 'pause: true'
+gz topic -e -t /world/hello/stats -n 1
+gz topic -l</code></pre>
+<p>The first pauses the world (<code>data: true</code> means it worked). The second prints one statistics message: the simulated time, the real time, the step size and the <code>real_time_factor</code> (1.0 here: simulated time passed at the same rate as real time), and <code>paused</code>. The third lists all Gazebo topics, including the ones the bridge does not carry.</p>
+</details>
+<div class="callout"><strong class="t">No "reset"</strong>
+<p>The control service also has a <code>reset</code> field. It was tried here (<code>{reset: {all: true}}</code>) and did not work as expected: afterwards the clock was not back at 0 and the box pose was no longer published. To run again, stop the launch in T1 (Ctrl+C) and start it again.</p></div>
+</li>
+
+<li>
+<h3>The window (optional)</h3>
+<details>
+<summary>Open the Gazebo window on a running server</summary>
+<p>This needs a display (the container run script passes yours through). <span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>gz sim -g</code></pre>
+<p>The window connects to the running server and shows the scene, with play, pause and step buttons. In the test for this lesson the command started and stayed up for 12 s with no error, and a warning about <code>XDG_RUNTIME_DIR</code> (harmless). What the window looked like was <strong>not checked</strong>. On a machine without a working GPU driver in the container, the window may fail; the headless way of the lesson does not need it.</p>
+</details>
+</li>
+</ol>
+
+<h2>4. Check</h2>
+<ul>
+<li>T2 listed the models <code>ground</code> and <code>box</code>, and the ROS 2 topics <code>/clock</code> and <code>/model/box/pose</code>.</li>
+<li>After play, T3 printed the box falling and landing at about 0.44 s with z = 0.100 m.</li>
+<li>Paused, the clock did not move; after a step of 100, it moved by 0.1 s.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Predict, then try. (1) The box starts at 2 m instead of 1 m: when does it land? (2) The box weighs 10 kg instead of 1 kg: when does it land? Make a copy of the world, change it, and start the launch with <code>world_file:=</code> and the path of your copy.</p>
+<details>
+<summary>Answer</summary>
+<p>(1) The centre falls 1.9 m: t = √(2 × 1.9 / 9.81) = 0.622 s. (2) Mass does not matter: gravity accelerates all bodies the same (there is no air in the world), so it lands at the same time as the 1 kg box. Both were run: the 2 m box printed <code>landed after 0.640 s</code> (the first 0.02 s sample after 0.622 s) and the 10 kg box <code>landed after 0.440 s</code>.</p>
+<pre class="cmd"><code>sed 's#&lt;pose&gt;0 0 1.0 0 0 0&lt;/pose&gt;#&lt;pose&gt;0 0 2.0 0 0 0&lt;/pose&gt;#' worlds/hello.sdf &gt; /tmp/w2.sdf
+ros2 launch c1_gazebo hello.launch.py world_file:=/tmp/w2.sdf</code></pre>
+<p>(For the second, change <code>&lt;mass&gt;1.0&lt;/mass&gt;</code> to <code>10.0</code> the same way. The inertia stays as it is; it only matters for rotation.)</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>Gazebo Harmonic: <code>gz sim</code>, a <strong>server</strong> (<code>-s</code>, the physics) and a <strong>GUI</strong> (<code>-g</code>). The server runs fine without a display.</li>
+<li>A <strong>world</strong> is an SDF file: physics settings, system plugins, models made of links with <code>inertial</code>, <code>collision</code> and <code>visual</code> parts.</li>
+<li>Gazebo has its own topics and services; <code>ros_gz_bridge</code> copies chosen ones to ROS 2 with the string <code>topic@RosType[GzType</code>.</li>
+<li>Simulated time is on <code>/clock</code>, advances in 1 ms steps, and can be paused, played and stepped through the <code>/world/hello/control</code> service. With a step, always send <code>pause: true</code>.</li>
+<li>The simulator agrees with <code>t = √(2h/g)</code>, and the mass of a falling body does not change when it lands.</li>
+<li>Not tested: reset, the Gazebo window's look, the sensors (a camera needs a renderer: C4).</li>
+</ul>
+
+<nav class="pager">
+<a href="b5-two-arms.html"><small>Previous</small>B5 · Two arms</a>
+<a class="next" href="c2-gen3-in-gazebo.html"><small>Next</small>C2 · The Gen3 in Gazebo</a>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

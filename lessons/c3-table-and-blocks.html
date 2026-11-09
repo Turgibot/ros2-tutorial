@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C3 · A table and lettered blocks</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part C · Simulation with Gazebo</span></header>
+<main>
+
+<h1>C3 · A table and lettered blocks</h1>
+<p class="lead">Build the lab the arm will work in: a table, four wooden-looking cubes with the letters A to D, and two cameras to look at them.</p>
+
+<h2>1. Goal</h2>
+<p>The course ends with the arm unstacking and stacking lettered blocks (Parts D and E). In this lesson you build the blocks' world and check that its physics is stable: a block must stay where it is put, and a block placed on another must stay on top. At the end you will have:</p>
+<ul>
+<li>written a block as a reusable model (mass, inertia, friction, a letter on each face) and a world that includes it,</li>
+<li>started the lab world and looked at it through a camera inside the simulation,</li>
+<li>checked from ROS 2 that the four blocks rest on the table without drifting,</li>
+<li>added a block while the simulation runs, and seen it stay on top of another.</li>
+</ul>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>Everything was run in the course container, headless. The three pictures on this page are not screenshots of the Gazebo window: they come from a camera <em>inside</em> the simulation (<code>--headless-rendering</code>), which is why they could be made without a display. Grasping a block with the arm is <strong>not</strong> in this lesson, so the friction and mass chosen here are only checked for resting and stacking. Whether they are good enough for the gripper is tested in D2.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>A model in its own folder</h3>
+<p>In C1 the box was written inside the world file. For four blocks that would be four copies of the same text. Instead, a block is a <strong>model</strong> in its own folder, and the world <strong>includes</strong> it:</p>
+<pre class="math">models/block_A/model.config          name and description
+models/block_A/model.sdf             the block: links, inertia, collision, visual
+models/block_A/materials/textures/block_A.png    the picture with the letter</pre>
+<p>The world refers to it as <code>model://block_A</code>. Gazebo finds the folder through the environment variable <code>GZ_SIM_RESOURCE_PATH</code>, a list of folders to search, like <code>PATH</code> for programs. The launch file of this lesson adds the <code>models</code> folder of the package to it.</p>
+
+<h3>Static and dynamic</h3>
+<p>A <code>static</code> model never moves and costs nothing to simulate: the ground, the table, the cameras. The blocks are dynamic: they have mass and gravity moves them.</p>
+
+<h3>Mass and inertia of a cube</h3>
+<p>A block is 5 cm on a side and weighs 50 g (light wood). The inertia of a solid cube around any axis through its centre is <code>m·s²/6</code> (s is the side):</p>
+<pre class="math">I = 0.05 kg × (0.05 m)² / 6 = 2.08e-5 kg·m²</pre>
+<p>A wrong inertia (too small) makes a body spin wildly when touched; too large makes it sluggish. Use the formula.</p>
+
+<h3>Friction</h3>
+<p>Coulomb friction: the force needed to slide a body is at most <code>μ·N</code>, where N is the force pressing the surfaces together and μ ("mu") the friction coefficient. A block on the table presses with N = m·g = 0.05 × 9.81 = 0.49 N, so with μ = 1 it takes 0.49 N to push it sideways. Two gripper pads each pressing with force F hold the block against gravity when <code>2·μ·F ≥ m·g</code>, that is <code>F ≥ 0.245 N</code> for μ = 1. A real gripper presses far harder than that; what limits grasping in a simulator is more often the contact solver than the force. The blocks and the table get μ = 1.0.</p>
+
+<h3>Collision and visual are separate</h3>
+<p>As in C1 and the URDF of B1, a link has a <code>collision</code> shape (physics) and a <code>visual</code> shape (looks). Here both are the same 5 cm cube. The letter is only in the visual: the physics does not know that the block says "A".</p>
+
+<h3>Cameras in the world</h3>
+<p>A <code>camera</code> sensor renders the scene from its position and publishes an image. The world needs the <code>Sensors</code> system with a render engine (<code>ogre2</code>), and the simulator must be started with <code>--headless-rendering</code> if there is no window. C4 uses the cameras properly; here they are the way to see what you built.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build the package</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span> The package <code>c3_world</code> depends on <code>c2_sim</code> (the launch file of C2), so build and source both:</p>
+<pre class="cmd"><code>cd code/c2-sim
+colcon build
+source install/setup.bash
+cd ../c3-world
+colcon build
+source install/setup.bash</code></pre>
+</li>
+
+<li>
+<h3>The block</h3>
+<pre class="src" data-file="code/c3-world/models/block_A/model.sdf"><code>&lt;?xml version="1.0"?&gt;
+&lt;sdf version="1.9"&gt;
+  &lt;model name="block_A"&gt;
+    &lt;!-- publish this block's pose, 20 times a second, on /model/block_A/pose --&gt;
+    &lt;plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher"&gt;
+      &lt;publish_model_pose&gt;true&lt;/publish_model_pose&gt;
+      &lt;publish_link_pose&gt;false&lt;/publish_link_pose&gt;
+      &lt;update_frequency&gt;20&lt;/update_frequency&gt;
+    &lt;/plugin&gt;
+    &lt;link name="link"&gt;
+      &lt;inertial&gt;
+        &lt;mass&gt;0.05&lt;/mass&gt;
+        &lt;inertia&gt;&lt;ixx&gt;2.08e-5&lt;/ixx&gt;&lt;iyy&gt;2.08e-5&lt;/iyy&gt;&lt;izz&gt;2.08e-5&lt;/izz&gt;&lt;ixy&gt;0&lt;/ixy&gt;&lt;ixz&gt;0&lt;/ixz&gt;&lt;iyz&gt;0&lt;/iyz&gt;&lt;/inertia&gt;
+      &lt;/inertial&gt;
+      &lt;collision name="collision"&gt;
+        &lt;geometry&gt;&lt;box&gt;&lt;size&gt;0.05 0.05 0.05&lt;/size&gt;&lt;/box&gt;&lt;/geometry&gt;
+        &lt;surface&gt;
+          &lt;friction&gt;&lt;ode&gt;&lt;mu&gt;1.0&lt;/mu&gt;&lt;mu2&gt;1.0&lt;/mu2&gt;&lt;/ode&gt;&lt;/friction&gt;
+        &lt;/surface&gt;
+      &lt;/collision&gt;
+      &lt;visual name="visual"&gt;
+        &lt;geometry&gt;&lt;box&gt;&lt;size&gt;0.05 0.05 0.05&lt;/size&gt;&lt;/box&gt;&lt;/geometry&gt;
+        &lt;material&gt;
+          &lt;diffuse&gt;1 1 1 1&lt;/diffuse&gt;
+          &lt;pbr&gt;&lt;metal&gt;&lt;albedo_map&gt;materials/textures/block_A.png&lt;/albedo_map&gt;&lt;/metal&gt;&lt;/pbr&gt;
+        &lt;/material&gt;
+      &lt;/visual&gt;
+    &lt;/link&gt;
+  &lt;/model&gt;
+&lt;/sdf&gt;</code></pre>
+<ul>
+<li>The <code>PosePublisher</code> plugin (as in C1) publishes the block's pose 20 times per second on <code>/model/block_A/pose</code>. This is how ROS 2 will know where each block is (C4).</li>
+<li><code>inertial</code> is the mass and the inertia computed above. <code>collision</code> has the friction, <code>mu</code> and <code>mu2</code> (the friction along the two directions of the surface).</li>
+<li>The <code>visual</code> has a texture, the picture <code>block_A.png</code>, mapped on every face of the cube, so the letter shows on all six faces.</li>
+</ul>
+<div class="callout"><strong class="t">A trap: the texture stays black</strong>
+<p>With only the <code>pbr</code> line the cube is <strong>black</strong>, in this version of Gazebo. This was tested with the camera: a cube with only <code>pbr/albedo_map</code> renders black, the same cube with <code>&lt;diffuse&gt;1 1 1 1&lt;/diffuse&gt;</code> added shows the letter. The <code>diffuse</code> line is not decoration.</p></div>
+<p>The other three blocks are the same file with <code>A</code> replaced by <code>B</code>, <code>C</code>, <code>D</code> (and a different picture: the course made them with the Python Imaging Library, a coloured square with a white border and letter).</p>
+</li>
+
+<li>
+<h3>The world</h3>
+<pre class="src" data-file="code/c3-world/worlds/lab.sdf"><code>&lt;?xml version="1.0"?&gt;
+&lt;sdf version="1.9"&gt;
+  &lt;world name="lab"&gt;
+    &lt;physics name="1ms" type="ode"&gt;
+      &lt;max_step_size&gt;0.001&lt;/max_step_size&gt;
+      &lt;real_time_factor&gt;1.0&lt;/real_time_factor&gt;
+    &lt;/physics&gt;
+    &lt;plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/&gt;
+    &lt;plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/&gt;
+    &lt;plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/&gt;
+    &lt;plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"&gt;
+      &lt;render_engine&gt;ogre2&lt;/render_engine&gt;
+    &lt;/plugin&gt;
+    &lt;gravity&gt;0 0 -9.81&lt;/gravity&gt;
+    &lt;scene&gt;&lt;ambient&gt;0.6 0.6 0.6 1&lt;/ambient&gt;&lt;background&gt;0.85 0.9 0.95 1&lt;/background&gt;&lt;/scene&gt;
+
+    &lt;light type="directional" name="sun"&gt;
+      &lt;cast_shadows&gt;true&lt;/cast_shadows&gt;
+      &lt;pose&gt;0 0 10 0 0 0&lt;/pose&gt;
+      &lt;direction&gt;-0.5 0.2 -0.9&lt;/direction&gt;
+      &lt;diffuse&gt;0.9 0.9 0.9 1&lt;/diffuse&gt;
+    &lt;/light&gt;
+
+    &lt;model name="ground"&gt;
+      &lt;static&gt;true&lt;/static&gt;
+      &lt;link name="link"&gt;
+        &lt;collision name="collision"&gt;&lt;geometry&gt;&lt;plane&gt;&lt;normal&gt;0 0 1&lt;/normal&gt;&lt;size&gt;10 10&lt;/size&gt;&lt;/plane&gt;&lt;/geometry&gt;&lt;/collision&gt;
+        &lt;visual name="visual"&gt;
+          &lt;geometry&gt;&lt;plane&gt;&lt;normal&gt;0 0 1&lt;/normal&gt;&lt;size&gt;10 10&lt;/size&gt;&lt;/plane&gt;&lt;/geometry&gt;
+          &lt;material&gt;&lt;ambient&gt;0.75 0.75 0.75 1&lt;/ambient&gt;&lt;diffuse&gt;0.75 0.75 0.75 1&lt;/diffuse&gt;&lt;/material&gt;
+        &lt;/visual&gt;
+      &lt;/link&gt;
+    &lt;/model&gt;
+
+    &lt;!-- the table: a solid box 0.6 m (x) by 0.9 m (y), 0.30 m high; its top is at z = 0.30 --&gt;
+    &lt;model name="table"&gt;
+      &lt;static&gt;true&lt;/static&gt;
+      &lt;pose&gt;0.65 0 0.15 0 0 0&lt;/pose&gt;
+      &lt;link name="link"&gt;
+        &lt;collision name="collision"&gt;
+          &lt;geometry&gt;&lt;box&gt;&lt;size&gt;0.6 0.9 0.3&lt;/size&gt;&lt;/box&gt;&lt;/geometry&gt;
+          &lt;surface&gt;&lt;friction&gt;&lt;ode&gt;&lt;mu&gt;1.0&lt;/mu&gt;&lt;mu2&gt;1.0&lt;/mu2&gt;&lt;/ode&gt;&lt;/friction&gt;&lt;/surface&gt;
+        &lt;/collision&gt;
+        &lt;visual name="visual"&gt;
+          &lt;geometry&gt;&lt;box&gt;&lt;size&gt;0.6 0.9 0.3&lt;/size&gt;&lt;/box&gt;&lt;/geometry&gt;
+          &lt;material&gt;&lt;ambient&gt;0.55 0.4 0.25 1&lt;/ambient&gt;&lt;diffuse&gt;0.55 0.4 0.25 1&lt;/diffuse&gt;&lt;/material&gt;
+        &lt;/visual&gt;
+      &lt;/link&gt;
+    &lt;/model&gt;
+
+    &lt;include&gt;
+      &lt;uri&gt;model://block_A&lt;/uri&gt;
+      &lt;pose&gt;0.60 -0.18 0.325 0 0 0&lt;/pose&gt;
+    &lt;/include&gt;
+
+    &lt;include&gt;
+      &lt;uri&gt;model://block_B&lt;/uri&gt;
+      &lt;pose&gt;0.60 -0.06 0.325 0 0 0&lt;/pose&gt;
+    &lt;/include&gt;
+
+    &lt;include&gt;
+      &lt;uri&gt;model://block_C&lt;/uri&gt;
+      &lt;pose&gt;0.60 0.06 0.325 0 0 0&lt;/pose&gt;
+    &lt;/include&gt;
+
+    &lt;include&gt;
+      &lt;uri&gt;model://block_D&lt;/uri&gt;
+      &lt;pose&gt;0.60 0.18 0.325 0 0 0&lt;/pose&gt;
+    &lt;/include&gt;
+
+    &lt;!-- a camera 1.2 m above the table, looking straight down --&gt;
+    &lt;model name="overhead_camera"&gt;
+      &lt;static&gt;true&lt;/static&gt;
+      &lt;pose&gt;0.65 0 1.3 0 1.5708 0&lt;/pose&gt;
+      &lt;link name="link"&gt;
+        &lt;sensor name="camera" type="camera"&gt;
+          &lt;camera&gt;
+            &lt;horizontal_fov&gt;1.0&lt;/horizontal_fov&gt;
+            &lt;image&gt;&lt;width&gt;640&lt;/width&gt;&lt;height&gt;480&lt;/height&gt;&lt;format&gt;R8G8B8&lt;/format&gt;&lt;/image&gt;
+            &lt;clip&gt;&lt;near&gt;0.1&lt;/near&gt;&lt;far&gt;5&lt;/far&gt;&lt;/clip&gt;
+          &lt;/camera&gt;
+          &lt;always_on&gt;1&lt;/always_on&gt;
+          &lt;update_rate&gt;10&lt;/update_rate&gt;
+          &lt;topic&gt;overhead_camera/image&lt;/topic&gt;
+        &lt;/sensor&gt;
+      &lt;/link&gt;
+    &lt;/model&gt;
+    &lt;!-- a second camera, to the side, looking at the blocks from an angle --&gt;
+    &lt;model name="side_camera"&gt;
+      &lt;static&gt;true&lt;/static&gt;
+      &lt;pose&gt;0.15 -0.5 0.62 0 0.43 0.74&lt;/pose&gt;
+      &lt;link name="link"&gt;
+        &lt;sensor name="camera" type="camera"&gt;
+          &lt;camera&gt;
+            &lt;horizontal_fov&gt;1.0&lt;/horizontal_fov&gt;
+            &lt;image&gt;&lt;width&gt;640&lt;/width&gt;&lt;height&gt;480&lt;/height&gt;&lt;format&gt;R8G8B8&lt;/format&gt;&lt;/image&gt;
+            &lt;clip&gt;&lt;near&gt;0.1&lt;/near&gt;&lt;far&gt;5&lt;/far&gt;&lt;/clip&gt;
+          &lt;/camera&gt;
+          &lt;always_on&gt;1&lt;/always_on&gt;
+          &lt;update_rate&gt;10&lt;/update_rate&gt;
+          &lt;topic&gt;side_camera/image&lt;/topic&gt;
+        &lt;/sensor&gt;
+      &lt;/link&gt;
+    &lt;/model&gt;
+  &lt;/world&gt;
+&lt;/sdf&gt;</code></pre>
+<ul>
+<li>It is the world of C1 with two more systems: <code>Sensors</code> (for the cameras), and a scene with a light background.</li>
+<li>The <strong>table</strong> is a static box 0.6 m (x) by 0.9 m (y) by 0.3 m, centred at x = 0.65 m. Its top is at z = 0.30 m, and it spans x from 0.35 m to 0.95 m. The arm will stand at the origin, facing +x, so the table is in front of it.</li>
+<li>The four <strong>blocks</strong> are <code>include</code>d at x = 0.60 m, y = −0.18, −0.06, 0.06 and 0.18 m (12 cm apart: the open gripper is 8.5 cm wide, so there is room for its fingers). Their centre is at z = 0.325 m: the top of the table plus half a block (0.30 + 0.025).</li>
+<li>The two <strong>cameras</strong> are static models with a <code>sensor</code>. The overhead one is 1.0 m above the table looking down, the side one looks at the blocks from the arm's side.</li>
+</ul>
+</li>
+
+<li>
+<h3>Start the lab</h3>
+<p>The launch file starts Gazebo (server only, running), and the bridge for the clock, the camera images and the four block poses. <span class="where box">container</span> T1:</p>
+<pre class="src" data-file="code/c3-world/launch/lab.launch.py"><code>"""The lab world alone (table, four blocks, overhead camera), plus the bridge for the clock, the block poses and the camera.
+Add gui:=true for the Gazebo window."""
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
+from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
+
+
+def launch_setup(context, *args, **kwargs):
+    share = get_package_share_directory("c3_world")
+    world = os.path.join(share, "worlds", "lab.sdf")
+    gui = LaunchConfiguration("gui").perform(context) == "true"
+    # -r: run at once; -s: server only; --headless-rendering: the camera renders without a display
+    cmd = ["gz", "sim", "-r"] + ([] if gui else ["-s", "--headless-rendering"]) + [world]
+    bridge_args = ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+                   "/overhead_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+                   "/overhead_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+                   "/side_camera/image@sensor_msgs/msg/Image[gz.msgs.Image"]
+    bridge_args += [f"/model/block_{k}/pose@geometry_msgs/msg/PoseStamped[gz.msgs.Pose" for k in "ABCD"]
+    return [
+        # model://block_A in the world file is found through this path
+        AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.path.join(share, "models")),
+        ExecuteProcess(cmd=cmd, output="screen"),
+        Node(package="ros_gz_bridge", executable="parameter_bridge", output="screen", arguments=bridge_args),
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([DeclareLaunchArgument("gui", default_value="false"), OpaqueFunction(function=launch_setup)])</code></pre>
+<pre class="cmd"><code>ros2 launch c3_world lab.launch.py</code></pre>
+<p>With <code>gui:=true</code> the Gazebo window opens instead (it was not tried here). In a second terminal (<strong>T2</strong>: <code>docker/run_ros2.sh</code> in the <code>ros2-tutorial</code> folder) list what is on the ROS 2 side:</p>
+<pre class="cmd"><code>ros2 topic list</code></pre>
+<pre class="out">/clock
+/model/block_A/pose
+/model/block_B/pose
+/model/block_C/pose
+/model/block_D/pose
+/overhead_camera/camera_info
+/overhead_camera/image
+/parameter_events
+/rosout
+/side_camera/image</pre>
+</li>
+
+<li>
+<h3>Look at the lab</h3>
+<p>The program <code>save_image.py</code> subscribes to an image topic, converts the first message to a picture and writes it as a PNG file. It is a small tool (Python only), not part of the lesson's code. <span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>cd code/c3-world
+source install/setup.bash
+python3 py/save_image.py /overhead_camera/image /tmp/top.png
+python3 py/save_image.py /side_camera/image /tmp/side.png</code></pre>
+<pre class="out">[INFO] [...] [save_image]: saved /tmp/top.png: 640x480, rgb8
+[INFO] [...] [save_image]: saved /tmp/side.png: 640x480, rgb8</pre>
+<p>The files are in the container's <code>/tmp</code>, which disappears when you leave. To keep them, save into <code>/workspace</code> instead (the repository folder, which is also on your computer). These are the pictures the course got:</p>
+<figure><img src="img/c3-lab-top.png" alt="top view: a table with four coloured cubes in a row" width="640" height="480">
+<figcaption>The overhead camera. The arm is at the bottom, out of the picture: the top of the image is +x (away from the arm), and the left side is +y. So the row runs from A on the right (y = −0.18) to D on the left (y = +0.18).</figcaption></figure>
+<figure><img src="img/c3-lab-side.png" alt="oblique view of the table with four lettered cubes" width="640" height="480">
+<figcaption>The side camera: the four blocks A (nearest) to D. The letter is on every face; the shadows come from the light of the world.</figcaption></figure>
+</li>
+
+<li>
+<h3>Check that the blocks stay put</h3>
+<p>The program reads the four pose topics and prints the position of every block once per second of simulated time.</p>
+<div class="lang py"><pre class="src" data-file="code/c3-world/py/check_settled.py"><code>#!/usr/bin/env python3
+"""Print the position of the four blocks once per second of simulated time, from the poses Gazebo publishes."""
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped
+
+BLOCKS = "ABCD"
+
+
+class CheckSettled(Node):
+    def __init__(self):
+        super().__init__("check_settled")
+        self.pose = {}
+        self.last_print = None
+        for k in BLOCKS:
+            self.create_subscription(PoseStamped, f"/model/block_{k}/pose",
+                                     lambda msg, k=k: self.on_pose(k, msg), 10)
+
+    def on_pose(self, k, msg):
+        self.pose[k] = msg.pose.position
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if len(self.pose) == len(BLOCKS) and (self.last_print is None or t - self.last_print &gt;= 1.0):
+            self.last_print = t
+            cols = "   ".join(f"{b}: {p.x:.4f} {p.y:.4f} {p.z:.4f}" for b, p in sorted(self.pose.items()))
+            self.get_logger().info(f"t = {t:5.1f} s   {cols}")
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(CheckSettled())
+
+
+if __name__ == "__main__":
+    main()</code></pre></div>
+<div class="lang cpp"><pre class="src" data-file="code/c3-world/cpp/check_settled.cpp"><code>// Print the position of the four blocks once per second of simulated time, from the poses Gazebo publishes.
+#include &lt;cstdio&gt;
+#include &lt;map&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;geometry_msgs/msg/pose_stamped.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+
+class CheckSettled : public rclcpp::Node {
+public:
+  CheckSettled() : Node("check_settled") {
+    for (char k : std::string("ABCD")) {
+      subs_.push_back(create_subscription&lt;geometry_msgs::msg::PoseStamped&gt;(
+          std::string("/model/block_") + k + "/pose", 10,
+          [this, k](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { on_pose(k, *msg); }));
+    }
+  }
+
+private:
+  void on_pose(char k, const geometry_msgs::msg::PoseStamped &amp;msg) {
+    pose_[k] = msg.pose.position;
+    double t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9;
+    if (pose_.size() == 4 &amp;&amp; (last_print_ &lt; 0 || t - last_print_ &gt;= 1.0)) {
+      last_print_ = t;
+      std::string line;
+      char buf[96];
+      for (const auto &amp;[b, p] : pose_) {
+        std::snprintf(buf, sizeof buf, "   %c: %.4f %.4f %.4f", b, p.x, p.y, p.z);
+        line += buf;
+      }
+      RCLCPP_INFO(get_logger(), "t = %5.1f s%s", t, line.c_str());
+    }
+  }
+
+  std::vector&lt;rclcpp::Subscription&lt;geometry_msgs::msg::PoseStamped&gt;::SharedPtr&gt; subs_;
+  std::map&lt;char, geometry_msgs::msg::Point&gt; pose_;
+  double last_print_ = -1.0;
+};
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;CheckSettled&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre></div>
+<p><span class="where box">container</span> T2:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run c3_world check_settled.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run c3_world check_settled</code></pre></div>
+<pre class="out">[INFO] [...] [check_settled]: t =   8.2 s   A: 0.6000 -0.1800 0.3250   B: 0.6000 -0.0600 0.3250   C: 0.6000 0.0600 0.3250   D: 0.6000 0.1800 0.3250
+[INFO] [...] [check_settled]: t =   9.2 s   A: 0.6000 -0.1800 0.3250   B: 0.6000 -0.0600 0.3250   C: 0.6000 0.0600 0.3250   D: 0.6000 0.1800 0.3250
+...</pre>
+<p>The first time (8.2 s here) depends on how long you waited. The positions are those of the world file, z = 0.3250 to four decimals, and they do not change from line to line: the blocks rest on the table. (A closer look at one pose, with <code>ros2 topic echo /model/block_A/pose --once</code>, shows z = 0.32499942: the block sinks 0.6 micrometres into the table, the solver's contact tolerance. Orientations are identity.) The header of the pose has <code>frame_id: lab</code>, the name of the world, which is the frame these coordinates are in. Press Ctrl+C.</p>
+</li>
+
+<li>
+<h3>Add a block while it runs, and make a tower</h3>
+<p>A model can also be created in a running world. <code>ros_gz_sim create</code> reads a model file and adds it under a new name. Drop a second block on top of A. Its centre will rest 5 cm above A's centre, at 0.325 + 0.05 = 0.375 m, so start it 4.5 cm higher, at z = 0.42 m. <span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>ros2 run ros_gz_sim create -file $(ros2 pkg prefix c3_world)/share/c3_world/models/block_A/model.sdf -name extra -x 0.6 -y -0.18 -z 0.42
+sleep 3
+gz model -m extra -p</code></pre>
+<pre class="out">[INFO] [...] [ros_gz_sim]: Entity creation successful.
+
+Requesting state for world [lab]...
+
+Model: [...]
+  - Name: extra
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [0.600000 -0.180000 0.375000]
+    [0.000000 0.000000 0.000000]</pre>
+<p>It fell 4.5 cm, landed on A, and stays at z = 0.375000, with orientation zero: the stack is stable. (The test run read the same pose 1 s, 4 s and 10 s after the spawn: no change.) The side camera, again:</p>
+<figure><img src="img/c3-tower.png" alt="two red blocks with the letter A stacked on the table, three other blocks beside them" width="640" height="480">
+<figcaption>The side camera after the spawn: a tower of two A blocks. The new block is a copy of A, so it also says A.</figcaption></figure>
+<p>Remove it again (the service of the world, from C1's family):</p>
+<pre class="cmd"><code>gz service -s /world/lab/remove --reqtype gz.msgs.Entity --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "extra" type: MODEL'
+gz model --list</code></pre>
+<pre class="out">data: true
+
+Requesting state for world [lab]...
+
+Available models:
+    - ground
+    - table
+    - block_A
+    - block_B
+    - block_C
+    - block_D
+    - overhead_camera
+    - side_camera
+</pre>
+<p>The model list is back to the eight models of the world file. The service name contains the world's name, <code>lab</code>.</p>
+</li>
+</ol>
+
+<h2>4. Check</h2>
+<ul>
+<li><code>ros2 topic list</code> showed the camera and the four block pose topics.</li>
+<li>The two pictures show the table and four lettered blocks, letters readable.</li>
+<li><code>check_settled</code> printed the same z = 0.3250 for every block, line after line.</li>
+<li>The spawned block rested at z = 0.375000 on top of A.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Spawn a second block named <code>extra2</code> on top of <code>extra</code> (a tower of three). Where does its centre rest? Predict it, then drop it from about 4.5 cm above that.</p>
+<details>
+<summary>Answer</summary>
+<p>Each block adds its height, 5 cm: the centres are at 0.325, 0.375 and 0.425 m. Run the spawn of step 7 twice with the names <code>extra</code> and <code>extra2</code>, the second at <code>-z 0.47</code> (4.5 cm above its resting height) after the first has landed. It was run: <code>extra</code> rested at 0.375000 and <code>extra2</code> at <code>0.425000</code>, still there 6 s later, with the lower block unmoved.</p>
+<pre class="cmd"><code>ros2 run ros_gz_sim create -file $(ros2 pkg prefix c3_world)/share/c3_world/models/block_A/model.sdf -name extra2 -x 0.6 -y -0.18 -z 0.47
+sleep 3
+gz model -m extra2 -p</code></pre>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>A reusable thing is a <strong>model</strong> in a folder (<code>model.config</code>, <code>model.sdf</code>, textures); a world pulls it in with <code>&lt;include&gt;&lt;uri&gt;model://name&lt;/uri&gt;</code>. <code>GZ_SIM_RESOURCE_PATH</code> tells Gazebo where to look.</li>
+<li>Dynamic bodies need a realistic <code>mass</code> and <code>inertia</code> (a cube: <code>m·s²/6</code>) and a friction coefficient <code>mu</code>. Static models (ground, table, cameras) cost nothing.</li>
+<li>In this Gazebo a texture needs <code>&lt;diffuse&gt;1 1 1 1&lt;/diffuse&gt;</code> next to <code>pbr/albedo_map</code>, or the cube is black.</li>
+<li>A <code>PosePublisher</code> plugin in a model gives its pose on <code>/model/NAME/pose</code>; the bridge turns it into a <code>PoseStamped</code>, with the world name as the frame.</li>
+<li>A camera in the world, with <code>--headless-rendering</code>, makes pictures without any window.</li>
+<li>Blocks at rest keep their z to a micrometre, and a stack of three stays up. Not tested here: grasping them (D2) and the Gazebo window.</li>
+</ul>
+
+<nav class="pager">
+<a href="c2-gen3-in-gazebo.html"><small>Previous</small>C2 · The Gen3 in Gazebo</a>
+<span class="soon next"><small>Next</small>C4 · Sensors and state (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

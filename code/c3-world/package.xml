@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>c3_world</name>
+  <version>0.1.0</version>
+  <description>Lessons C3 and C4: a lab world for Gazebo with a table, four lettered blocks and an overhead camera, a launch file and small Python and C++ programs</description>
+  <maintainer email="you@example.com">course</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <exec_depend>c2_sim</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

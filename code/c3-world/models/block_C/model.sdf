@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="block_C">
+    <!-- publish this block's pose, 20 times a second, on /model/block_C/pose -->
+    <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+      <publish_model_pose>true</publish_model_pose>
+      <publish_link_pose>false</publish_link_pose>
+      <update_frequency>20</update_frequency>
+    </plugin>
+    <link name="link">
+      <inertial>
+        <mass>0.05</mass>
+        <inertia><ixx>2.08e-5</ixx><iyy>2.08e-5</iyy><izz>2.08e-5</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+        <surface>
+          <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr><metal><albedo_map>materials/textures/block_C.png</albedo_map></metal></pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

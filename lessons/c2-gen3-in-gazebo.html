@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C2 · The Gen3 in Gazebo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part C · Simulation with Gazebo</span></header>
+<main>
+
+<h1>C2 · The Gen3 in Gazebo</h1>
+<p class="lead">The same arm, the same controllers and the same commands as in A7, now with mass, contact and a floor.</p>
+
+<h2>1. Goal</h2>
+<p>In A7 the arm was moved by <code>mock_components</code>: a program that repeats every command as the new joint position. This lesson replaces that one piece with Gazebo. You keep the controllers, the topics, the actions and every command you already know, and you get a body that has to obey physics.</p>
+<p>At the end you will have:</p>
+<ul>
+<li>started the Gen3 with a Robotiq gripper in Gazebo from a launch file of this course,</li>
+<li>seen what <code>gz_ros2_control</code> does, and that only one line in the robot description differs from the fake arm,</li>
+<li>moved the arm and the gripper with the commands of A7,</li>
+<li>paused the world in the middle of a trajectory and stepped it by hand,</li>
+<li>and seen where the fake arm and the Gazebo arm differ: the Gazebo arm cannot go through the floor.</li>
+</ul>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>Everything below was run in the course container, with Gazebo <strong>without a window</strong> (<code>gui:=false</code>). With the window (the default of the launch file) the launch was started and both <code>gz sim server</code> and <code>gz sim gui</code> were running with no error in the log, but nobody looked at the window, so there is no screenshot and no description of how it looks. The real arm, RViz with the simulation, and the camera were not tried.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>What changes, and what does not</h3>
+<p>In A7 you learned the layers of ros2_control: <em>hardware component</em> at the bottom, <em>controllers</em> above it, <em>your program</em> on top. The twin works because only the bottom layer is replaced:</p>
+<table>
+<tr><th>Layer</th><th>Fake arm (A7)</th><th>Gazebo (this lesson)</th><th>Real arm</th></tr>
+<tr><td>your program</td><td colspan="3">the same: actions, topics, MoveIt (from C5)</td></tr>
+<tr><td>controllers</td><td colspan="3">the same: <code>joint_trajectory_controller</code>, <code>robotiq_gripper_controller</code>, <code>joint_state_broadcaster</code></td></tr>
+<tr><td>hardware component</td><td><code>mock_components/GenericSystem</code></td><td><code>gz_ros2_control/GazeboSimSystem</code></td><td>the Kinova driver</td></tr>
+<tr><td>the "arm"</td><td>nothing</td><td>bodies, joints and contacts in Gazebo</td><td>motors</td></tr>
+</table>
+
+<h3><code>gz_ros2_control</code></h3>
+<p>It is a Gazebo system plugin (as in C1) that lives inside the simulator. It starts a <code>controller_manager</code> there, and gives it the simulated joints as a hardware component: when a controller writes a joint command, the plugin applies it to the Gazebo joint, and when a controller reads the joint state, the plugin gets it from Gazebo. The controllers do not know the difference. In the arm's description, one <code>xacro:if</code> picks the plugin: <code>sim_gazebo:=true</code> gives <code>gz_ros2_control/GazeboSimSystem</code>, <code>use_fake_hardware:=true</code> gives <code>mock_components/GenericSystem</code>.</p>
+
+<h3>The launch file</h3>
+<p>Kinova ships <code>kortex_sim_control.launch.py</code>, but it always opens the Gazebo window (so it cannot run on a machine without a display) and always loads <code>empty.sdf</code>. This course uses a copy, <code>code/c2-sim/launch/sim.launch.py</code>, with a few more arguments: <code>gui</code> (window or not), <code>world</code> (which world file), <code>gripper</code> (Robotiq 2F-85 by default: upstream the default is no gripper, and then the gripper controller fails to start), and the spawn position <code>x y z</code>. Everything else is as upstream: the same description, the same controller file, the same controller names.</p>
+
+<h3>Simulated time again</h3>
+<p>Everything in the simulation uses the <code>/clock</code> of C1: the launch file bridges it, and the nodes run with <code>use_sim_time</code>. When Gazebo is paused, the controllers do not run, because their clock does not move.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build the package</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>cd code/c2-sim
+colcon build
+source install/setup.bash</code></pre>
+<p>The package only installs a launch file, so it builds in a second.</p>
+</li>
+
+<li>
+<h3>The launch file</h3>
+<pre class="src" data-file="code/c2-sim/launch/sim.launch.py"><code>"""The Kinova Gen3 (7 DoF, Robotiq 2F-85) in Gazebo.
+
+Based on kortex_bringup/launch/kortex_sim_control.launch.py, which always opens the Gazebo window and always loads
+empty.sdf. Differences: `gui` switches the window off, `world` picks the world file, `gripper` defaults to
+robotiq_2f_85, `x y z` set where the arm is spawned, and RViz is off by default. The controllers, the robot
+description and the controller names are the same as in the upstream launch file, so a program written for this
+one also works with the fake hardware and (in principle) with the real arm."""
+import os
+
+from ament_index_python.packages import get_package_prefix
+from launch import LaunchDescription
+from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription,
+                            OpaqueFunction)
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+
+
+def launch_setup(context, *args, **kwargs):
+    gui = LaunchConfiguration("gui").perform(context)
+    world = LaunchConfiguration("world").perform(context)
+    gripper = LaunchConfiguration("gripper")
+    launch_rviz = LaunchConfiguration("launch_rviz")
+    use_sim_time = {"use_sim_time": True}
+
+    controllers = PathJoinSubstitution([
+        FindPackageShare("kortex_description"), "arms/gen3/7dof/config", "ros2_controllers.yaml"])
+    robot_description_content = Command([
+        PathJoinSubstitution([FindExecutable(name="xacro")]), " ",
+        PathJoinSubstitution([FindPackageShare("kortex_description"), "robots", "kinova.urdf.xacro"]), " ",
+        "robot_ip:=xxx.yyy.zzz.www name:=gen3 arm:=gen3 dof:=7 vision:=false prefix:=\"\" sim_gazebo:=true ",
+        "simulation_controllers:=", controllers, " gripper:=", gripper])
+    robot_description = robot_description_content.perform(context)
+
+    # Gazebo: -r runs at once, -s is the server only (no window)
+    gz_args = "-r -v 3 " + ("" if gui == "true" else "-s ") + world + \
+        " --physics-engine gz-physics-bullet-featherstone-plugin"
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([FindPackageShare("ros_gz_sim"), "/launch/gz_sim.launch.py"]),
+        launch_arguments={"gz_args": gz_args}.items())
+
+    spawn = Node(
+        package="ros_gz_sim", executable="create", output="screen",
+        arguments=["-string", robot_description, "-name", "gen3", "-allow_renaming", "true",
+                   "-x", LaunchConfiguration("x"), "-y", LaunchConfiguration("y"), "-z", LaunchConfiguration("z")])
+
+    clock_bridge = Node(
+        package="ros_gz_bridge", executable="parameter_bridge", output="screen",
+        arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"])
+
+    rsp = Node(package="robot_state_publisher", executable="robot_state_publisher", output="both",
+               parameters=[{"robot_description": robot_description}, use_sim_time])
+
+    def spawner(*args):
+        return Node(package="controller_manager", executable="spawner",
+                    arguments=list(args) + ["-c", "/controller_manager"])
+
+    rviz = Node(package="rviz2", executable="rviz2", output="log", condition=IfCondition(launch_rviz),
+                arguments=["-d", PathJoinSubstitution([FindPackageShare("kortex_description"), "rviz",
+                                                       "view_robot.rviz"])],
+                parameters=[use_sim_time])
+
+    robotiq_share = os.path.join(get_package_prefix("robotiq_description"), "share")
+    resource_path = AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", robotiq_share)
+
+    return [clock_bridge, rsp,
+            spawner("joint_state_broadcaster"), spawner("joint_trajectory_controller"),
+            spawner("twist_controller", "--inactive"), spawner("joint_group_velocity_controller", "--inactive"),
+            spawner("robotiq_gripper_controller"),
+            resource_path, gazebo, spawn, rviz]
+
+
+def generate_launch_description():
+    args = [
+        DeclareLaunchArgument("gui", default_value="true", description="open the Gazebo window (false: server only)"),
+        DeclareLaunchArgument("world", default_value="empty.sdf", description="world file (name or full path)"),
+        DeclareLaunchArgument("gripper", default_value="robotiq_2f_85", description="robotiq_2f_85, robotiq_2f_140 or empty"),
+        DeclareLaunchArgument("x", default_value="0.0"),
+        DeclareLaunchArgument("y", default_value="0.0"),
+        DeclareLaunchArgument("z", default_value="0.0"),
+        DeclareLaunchArgument("launch_rviz", default_value="false"),
+    ]
+    return LaunchDescription(args + [OpaqueFunction(function=launch_setup)])</code></pre>
+<p>It starts the clock bridge (the same string as in C1), <code>robot_state_publisher</code>, five controller spawners (two of them inactive, as upstream: the twist and velocity controllers), Gazebo with <code>empty.sdf</code>, and the spawner <code>ros_gz_sim create</code>, which turns the robot description into a model in the running world. <code>--physics-engine gz-physics-bullet-featherstone-plugin</code> picks a physics engine meant for robots with joints (C1 used the default, ODE).</p>
+</li>
+
+<li>
+<h3>Start the simulation</h3>
+<p><span class="where box">container</span> T1:</p>
+<pre class="cmd"><code>ros2 launch c2_sim sim.launch.py</code></pre>
+<p>This opens the Gazebo window. On a machine without a display, or if the window fails, add <code>gui:=false</code>: the rest of the lesson is the same. Wait about 20 seconds. The log is long; harmless warnings at the start say <code>The resource manager is not yet initialized</code> and <code>Executor is not available during hardware component initialization</code>. What matters is that no line says <code>ERROR</code>.</p>
+</li>
+
+<li>
+<h3>Look around</h3>
+<p>Open a second terminal in the <code>ros2-tutorial</code> folder, enter a container (<strong>T2</strong>: <code>docker/run_ros2.sh</code>), and ask the same questions as in A7:</p>
+<pre class="cmd"><code>ros2 control list_controllers
+ros2 node list
+gz model --list</code></pre>
+<pre class="out">robotiq_gripper_controller      parallel_gripper_action_controller/GripperActionController  active
+joint_trajectory_controller     joint_trajectory_controller/JointTrajectoryController       active
+twist_controller                picknik_twist_controller/PicknikTwistController             inactive
+joint_group_velocity_controller velocity_controllers/JointGroupVelocityController           inactive
+joint_state_broadcaster         joint_state_broadcaster/JointStateBroadcaster               active
+/controller_manager
+/gz_ros_control
+/joint_group_velocity_controller
+/joint_state_broadcaster
+/joint_trajectory_controller
+/robot_state_publisher
+/robotiq_gripper_controller
+/ros_gz_bridge
+/twist_controller
+
+Available models:
+    - ground_plane
+    - gen3
+</pre>
+<p>(The order of the controllers can differ.) Compare with A7: the same controllers, active and inactive as before. Two new names: <code>/gz_ros_control</code> is the plugin of Gazebo, which hosts the <code>controller_manager</code>, and <code>/ros_gz_bridge</code> is the clock bridge. There are two models in the world: the ground, and the arm, which the spawner created.</p>
+<p>The joints (T2):</p>
+<pre class="cmd"><code>ros2 topic echo /joint_states --once --field name
+ros2 topic hz /joint_states</code></pre>
+<pre class="out">['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6', 'joint_7', 'robotiq_85_left_knuckle_joint']
+average rate: 1000.084
+	min: 0.001s max: 0.001s std dev: 0.00001s window: 1002</pre>
+<p>Seven arm joints and one gripper joint, published at 1000 Hz: once per simulation step. (Because of that rate, <code>ros2 topic echo</code> may print <code>A message was lost!!!</code> before the data; it is harmless.) Press Ctrl+C to stop <code>hz</code>. The fake arm (A7) listed six extra gripper joints, <code>mimic</code> joints that move with the first; Gazebo reports only the knuckle joint, and moves the others itself.</p>
+</li>
+
+<li>
+<h3>Move the arm: the same command as in A7</h3>
+<p><span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.3, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 4}}]}}"
+ros2 topic echo /joint_states --once --field position
+</code></pre>
+<pre class="out">Goal accepted with ID: 8bfa8873e72e44aaa62ed0dee6ce52b1
+Result:
+    error_code: 0
+error_string: Goal successfully reached!
+Goal finished with status: SUCCEEDED
+array('d', [0.4999990463256836, 0.2999993562698364, -2.0413860113421833e-07, -0.9999997019767761, -2.2954711766942637e-06, 0.49994680285453796, 8.38812775327824e-06, 0.7205301523208618])</pre>
+<p>The goal ID differs on every run. The arm took 4 s of <em>simulated</em> time. Compare the positions with the goal: <code>[0.5, 0.3, 0, -1.0, 0, 0.5, 0]</code>. They are close but not equal: joint 1 is 0.499999, joint 6 is 0.49995. With the fake arm the arm is at the goal exactly, as a copy of the command. Here a controller drives a simulated motor, and a motor stops a little short. The last number, 0.7205, is the gripper, which has not moved.</p>
+</li>
+
+<li>
+<h3>The gripper</h3>
+<p><span class="where box">container</span> T2: close to 0.0, and then open to 0.8, as in the notes of the environment test (the action type is <code>ParallelGripperCommand</code>; the old <code>GripperCommand</code> in the upstream README is wrong for this version):</p>
+<pre class="cmd"><code>ros2 action send_goal /robotiq_gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand "{command: {name: [robotiq_85_left_knuckle_joint], position: [0.0]}}"
+ros2 topic echo /joint_states --once --field position
+ros2 action send_goal /robotiq_gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand "{command: {name: [robotiq_85_left_knuckle_joint], position: [0.8]}}"
+ros2 topic echo /joint_states --once --field position</code></pre>
+<pre class="out">Goal accepted with ID: 1fed0b969d2c48d89e6f07b7c208666a
+Result:
+stalled: false
+reached_goal: true
+Goal finished with status: SUCCEEDED
+array('d', [0.5000002384185791, 0.29999983310699463, 6.691373499734254e-08, -1.0, 6.974939026349602e-08, 0.5000001788139343, 5.645656830921553e-09, 1.57291367486323e-07])
+Goal accepted with ID: 4130f1fdf1284e02b822f546930254fb
+Result:
+stalled: false
+reached_goal: true
+Goal finished with status: SUCCEEDED
+array('d', [0.4999990463256836, 0.29999932646751404, -2.0107627562993002e-07, -0.9999997615814209, -2.260600240333588e-06, 0.4999464750289917, 8.517438800481614e-06, 0.7986968755722046])</pre>
+<p>The last number is the knuckle: 0.0000002 after "close to 0.0" (the gripper opens fully at 0), and 0.7987 after "0.8" (closed, to within 0.0013 rad). On the Robotiq 2F-85 the value 0 is <strong>open</strong> and about 0.8 is <strong>closed</strong>. The gripper started at 0.72: almost closed. Notice how the arm joints change in the 6th digit between reads: the arm is held by controllers, not frozen.</p>
+</li>
+
+<li>
+<h3>Frames: <code>tool_frame</code> is not there</h3>
+<p>In B1 the arm without a gripper ended in <code>tool_frame</code>. With the gripper, the tree ends differently (the gripper's links hang below <code>end_effector_link</code>), and <code>tool_frame</code> does not exist: <code>tf2_echo</code> keeps waiting with <code>Invalid frame ID "tool_frame" ... frame does not exist</code>. Use <code>end_effector_link</code>. <span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<p>It prints the pose of the hand in the base frame (translation in metres and the rotation in several forms), the same as in B2, now computed from the simulated joint angles. Press Ctrl+C. With the arm at the pose of step 5 (and the same joint values), a fake arm gives the identical translation: <code>[-0.110, 0.032, 1.091]</code> in both. (It is the same URDF; only the source of the joint values differs.)</p>
+</li>
+
+<li>
+<h3>Pause the world in the middle of a trajectory</h3>
+<p>The controller runs on simulated time, so pausing Gazebo stops the arm. T2: send a goal that takes 6 s, back to all zeros. The command waits until the goal is finished:</p>
+<pre class="cmd"><code>ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 6}}]}}"</code></pre>
+<p>Open a third terminal (<strong>T3</strong>), enter a container, and within the first two seconds pause the world. The world is called <code>empty</code> here (<code>empty.sdf</code>), so the service is <code>/world/empty/control</code>:</p>
+<pre class="cmd"><code>gz service -s /world/empty/control --reqtype gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 2000 --req 'pause: true'
+ros2 topic echo /joint_states --once --field position
+sleep 3
+ros2 topic echo /joint_states --once --field position</code></pre>
+<p>Read <code>joint_1</code>, the first number. In the test run, 2 s into the goal it was 0.397, and after the pause 0.3738 then 0.3738 again 3 s of real time later: the arm stopped where it was. (The first reading comes a bit before the pause takes effect, so it is not the value at the pause.) Resume:</p>
+<pre class="cmd"><code>gz service -s /world/empty/control --reqtype gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 2000 --req 'pause: false'</code></pre>
+<p>The arm continues, and T2 ends with <code>Goal finished with status: SUCCEEDED</code>. The 6 seconds of the trajectory counted only simulated time.</p>
+<p>The same control is bridged to ROS 2 if you add <code>/world/empty/control@ros_gz_interfaces/srv/ControlWorld</code> to a <code>parameter_bridge</code>, as in C1. This launch file does not bridge it, so use <code>gz service</code> here.</p>
+</li>
+
+<li>
+<h3>What the fake arm cannot do: touch the floor</h3>
+<p>The base of the arm stands on the ground at z = 0. Send joint 2 to 2.3 rad (the arm leaning far forward, joint 2's limit is about 2.4), with all other joints 0, and read where the hand and the finger are. <span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.0, 2.3, 0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 4}}]}}"
+ros2 topic echo /joint_states --once --field position
+ros2 run tf2_ros tf2_echo base_link end_effector_link
+ros2 run tf2_ros tf2_echo base_link robotiq_85_left_finger_link</code></pre>
+<p>(Press Ctrl+C after the first translation line of each <code>tf2_echo</code>.) What the test run printed:</p>
+<pre class="out">Goal finished with status: SUCCEEDED
+array('d', [-3.57e-07, 1.9031, -8.3e-05, 1.4e-07, -2.6e-05, -0.4465, 7.2e-05, 0.8000])
+- Translation: [0.861, -0.025, 0.064]       (end_effector_link)
+- Translation: [0.942, -0.025, 0.018]       (left finger link)</pre>
+<p>Three things are visible:</p>
+<ul>
+<li>The goal was <code>joint_2 = 2.3</code>, and the arm stopped at <strong>1.903</strong>. The hand is 6 cm above the floor and the finger is 1.8 cm above it: the gripper has landed on the ground and cannot go further.</li>
+<li>Joint 6 was commanded 0 and is at −0.4465: the floor pushed on the hand, and the wrist most likely gave way (not checked further).</li>
+<li>The action still says <code>SUCCEEDED</code>. The controller in this configuration does not check that the final position is within a tolerance of the goal. Do not use "succeeded" as proof that the arm got there; compare with <code>/joint_states</code>.</li>
+</ul>
+<p>The fake arm, given the same command, reaches 2.3 exactly, and its hand ends at z = <strong>−0.317</strong> m: 32 cm <em>below</em> the floor, because nothing is there. That is the first reason for the simulator.</p>
+<p>Put the arm back so that the next lessons start from a clean pose:</p>
+<pre class="cmd"><code>ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 4}}]}}"</code></pre>
+</li>
+</ol>
+
+<div class="callout"><strong class="t">The twin is not the arm</strong>
+<p>Even with the same controllers, the Gazebo arm differs from the real one: the motor model is simple (a position proportional gain of 0.1 in the plugin's log), there is no delay on the cable, the friction is a guess, and the gripper's finger joints are simplified. The first use of the twin is to find logic bugs without risk; later, to compare joint states with the real arm and tune the parameters. The plan for that is in the Digital twin notes of the repository (PLAN.md).</p></div>
+
+<h2>4. Check</h2>
+<ul>
+<li>Five controllers (three active) and the models <code>ground_plane</code> and <code>gen3</code>.</li>
+<li>After step 5 the arm joints are within about 0.001 rad of the goal.</li>
+<li>The gripper reads about 0 after "0.0" and about 0.8 after "0.8".</li>
+<li>Paused, the joint values do not change. Resumed, the goal succeeds.</li>
+<li>The arm on the floor stops at joint 2 = 1.90, not 2.3.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Pause the world, send this goal (move joint 1 to 0.5 rad in 2 s, the rest 0), and then step the world 1000 times (1 s). Where is <code>joint_1</code> now? Then step 1000 more. Predict first.</p>
+<pre class="cmd"><code>gz service -s /world/empty/control --reqtype gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 2000 --req 'pause: true'
+ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 2}}]}}"</code></pre>
+<p>(The second command waits. Run the steps in T3:)</p>
+<pre class="cmd"><code>gz service -s /world/empty/control --reqtype gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 2000 --req 'pause: true multi_step: 1000'
+ros2 topic echo /joint_states --once --field position</code></pre>
+<details>
+<summary>Answer</summary>
+<p>The trajectory goes from 0 to 0.5 in 2 s in a straight line, so after 1 s of simulated time (1000 steps of 1 ms) the joint is halfway, 0.25. The test printed <code>0.2475</code> (the controller starts a few steps after the goal), then <code>0.4975</code> after the second 1000 steps and <code>0.49999988</code> after 500 more, where the goal finished. This is how a program can drive the simulator at its own pace: the world moves only when it is stepped. Note that you must send <code>pause: true</code> with <code>multi_step</code>, as in C1.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>The Gazebo arm differs from the fake arm in <strong>one line</strong> of the description (<code>gz_ros2_control/GazeboSimSystem</code> instead of <code>mock_components/GenericSystem</code>). The controllers, topics and actions are the same, so the commands of A7 work unchanged.</li>
+<li><code>sim.launch.py</code> of the course: <code>gui:=false</code> for no window, <code>world:=</code> for another world, the gripper included by default.</li>
+<li>Controllers run on simulated time: pausing Gazebo stops the arm, and stepping moves it by exactly the stepped time.</li>
+<li>Simulated motors stop a little short of the goal; the floor stops the arm for real. The action result <code>SUCCEEDED</code> does not guarantee that the pose was reached: read <code>/joint_states</code>.</li>
+<li>With a gripper the tool frame is <code>end_effector_link</code>, not <code>tool_frame</code>. The Robotiq knuckle is 0 for open and about 0.8 for closed.</li>
+<li>Not tested: the window's look, RViz together with Gazebo, the camera, and the real arm.</li>
+</ul>
+
+<nav class="pager">
+<a href="c1-gazebo-basics.html"><small>Previous</small>C1 · Gazebo basics</a>
+<a class="next" href="c3-table-and-blocks.html"><small>Next</small>C3 · A table and lettered blocks</a>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
