@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B4 · MoveIt 2</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part B · The Kinova Gen3</span></header>
+<main>
+
+<h1>B4 · MoveIt 2</h1>
+<p class="lead">You say where the hand should go. MoveIt finds a path that does not hit anything, and sends it to the arm. You will run it on the fake arm, add a box to the world, and watch the path bend around it.</p>
+
+<h2>1. Goal</h2>
+<p>In B3 you solved inverse kinematics yourself. A real task needs more: a motion that is smooth, respects the joint limits, and <strong>does not hit the arm itself or anything else in the room</strong>. That is <strong>motion planning</strong>, and <strong>MoveIt 2</strong> is the ROS 2 package that does it. In this lesson you do not write a planner; you <em>ask</em> one.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>started MoveIt on the fake arm and listed what it offers (the <code>move_group</code> node: an action, services and topics),</li>
+<li>sent a "put the hand here" goal from a program (Python and C++), and seen the hand arrive where <code>tf2_echo</code> says,</li>
+<li>put a box into MoveIt's picture of the world, and seen the same goal give a longer path that goes around it,</li>
+<li>seen what MoveIt answers when a goal cannot be reached.</li>
+</ul>
+
+<h2>2. Concepts</h2>
+<h3>What MoveIt is</h3>
+<p>MoveIt is not one program but a set of pieces around one node, <strong><code>move_group</code></strong>. It holds a model of the robot (the URDF of B1 plus some extra information), a model of the world, a planner, and a connection to the controller of A7. Your program never plans: it sends a request to <code>move_group</code> and gets an answer.</p>
+<figure>
+<svg viewBox="0 0 460 470" role="img" aria-labelledby="mg-t mg-d" style="max-width:460px;width:100%;font-family:system-ui,sans-serif">
+<title id="mg-t">How a request flows through MoveIt</title>
+<desc id="mg-d">Your program sends a goal and collision boxes to move_group. move_group sends a trajectory to the joint trajectory controller, which commands the arm.</desc>
+<defs><marker id="mg-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/></marker></defs>
+<g style="stroke:var(--muted);stroke-width:2;fill:none" marker-end="url(#mg-ar)">
+<line x1="170" y1="62" x2="170" y2="138" marker-end="url(#mg-ar)"/>
+<line x1="290" y1="62" x2="290" y2="138" marker-end="url(#mg-ar)"/>
+<line x1="230" y1="242" x2="230" y2="298" marker-end="url(#mg-ar)"/>
+<line x1="230" y1="364" x2="230" y2="416" marker-end="url(#mg-ar)"/>
+</g>
+<!-- your program -->
+<rect x="110" y="8" width="240" height="54" rx="10" style="fill:var(--out-bg);stroke:var(--line);stroke-width:1.5"/>
+<text x="230" y="32" text-anchor="middle" font-size="16" font-weight="700" style="fill:var(--fg)">your program</text>
+<text x="230" y="51" text-anchor="middle" font-size="13" style="fill:var(--muted)">move_pose, add_box</text>
+<text x="162" y="94" text-anchor="end" font-size="13" font-weight="600" style="fill:var(--fg)">goal</text>
+<text x="162" y="110" text-anchor="end" font-size="12" style="fill:var(--muted)">/move_action</text>
+<text x="298" y="94" font-size="13" font-weight="600" style="fill:var(--fg)">boxes</text>
+<text x="298" y="110" font-size="12" style="fill:var(--muted)">/apply_planning_scene</text>
+<!-- move_group -->
+<rect x="30" y="140" width="400" height="102" rx="12" style="fill:var(--note);stroke:var(--note-line);stroke-width:2"/>
+<text x="230" y="166" text-anchor="middle" font-size="17" font-weight="700" style="fill:var(--fg)">move_group</text>
+<text x="230" y="190" text-anchor="middle" font-size="13" style="fill:var(--fg)">robot model (URDF + SRDF) · planning scene</text>
+<text x="230" y="209" text-anchor="middle" font-size="13" style="fill:var(--fg)">IK solver · collision checks</text>
+<text x="230" y="228" text-anchor="middle" font-size="13" style="fill:var(--fg)">planner (OMPL) · timing</text>
+<text x="240" y="274" font-size="13" font-weight="600" style="fill:var(--fg)">trajectory</text>
+<text x="240" y="290" font-size="12" style="fill:var(--muted)">FollowJointTrajectory action</text>
+<!-- controller -->
+<rect x="90" y="300" width="280" height="64" rx="10" style="fill:var(--ok);stroke:var(--ok-line);stroke-width:2"/>
+<text x="230" y="328" text-anchor="middle" font-size="15" font-weight="700" style="fill:var(--fg)">joint_trajectory_controller</text>
+<text x="230" y="348" text-anchor="middle" font-size="13" style="fill:var(--muted)">ros2_control, lesson A7</text>
+<text x="240" y="396" font-size="13" font-weight="600" style="fill:var(--fg)">joint positions</text>
+<!-- arm -->
+<rect x="120" y="418" width="220" height="46" rx="10" style="fill:var(--out-bg);stroke:var(--line);stroke-width:1.5"/>
+<text x="230" y="446" text-anchor="middle" font-size="15" font-weight="700" style="fill:var(--fg)">the arm (fake or real)</text>
+</svg>
+<figcaption>What happens to a request. Your program never plans: it only talks to <code>move_group</code>. Everything below <code>move_group</code> is lesson A7.</figcaption>
+</figure>
+
+<h3>The planning group, from the SRDF</h3>
+<p>The URDF says how the robot is built. MoveIt also needs to know which joints belong together. That comes from a second file, the <strong>SRDF</strong> (<code>config/gen3.srdf</code> in the MoveIt package of the Gen3). It defines two <strong>planning groups</strong>:</p>
+<ul>
+<li><code>manipulator</code>: the chain from <code>base_link</code> to <code>end_effector_link</code>, the seven arm joints (the same <code>end_effector_link</code> as in B2 and B3),</li>
+<li><code>gripper</code>: the finger joints of the Robotiq gripper.</li>
+</ul>
+<p>It also defines <strong>named poses</strong> such as <code>Home</code>, <code>Retract</code> and <code>Vertical</code> for the arm. Every request names the group it is for. This lesson moves only the <code>manipulator</code>.</p>
+
+<h3>The planning scene: the world MoveIt knows</h3>
+<p>MoveIt checks every path against the <strong>planning scene</strong>: the robot's current joint values plus a list of <strong>collision objects</strong> (boxes, spheres, meshes), each with a name and a pose. It also checks the arm against <em>itself</em>. If an object is not in the scene, MoveIt does not know it exists. A box on your real table is invisible until somebody puts it in the scene, from a program, from a camera, or by hand in RViz.</p>
+
+<h3>What a plan is</h3>
+<ol>
+<li><strong>Goal.</strong> A pose is not a set of joint angles, so MoveIt first needs joint angles: it uses an IK solver (a plugin; here KDL, a numerical method in the family of B3).</li>
+<li><strong>Search.</strong> The planner (<strong>OMPL</strong>, <code>RRTConnect</code> here) looks for a path through <em>joint space</em>: it tries random joint settings, throws away those in collision, and links the rest from the start to the goal. Because it is random, <strong>two runs give two different paths</strong>.</li>
+<li><strong>Timing.</strong> The path is only a list of joint settings. MoveIt adds times, respecting the speed and acceleration limits, to make a <strong>trajectory</strong> (the list of points with times that you saw in A7).</li>
+<li><strong>Execute.</strong> The trajectory goes to the controller as a <code>FollowJointTrajectory</code> action goal (A3, A7).</li>
+</ol>
+<p>Planning and executing are separate steps. The programs below do both, in one request.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Get the programs</h3>
+<p>The package <code>code/b4-moveit</code> has two programs in Python and in C++: <code>move_pose</code> (plan and move the hand to a pose) and <code>add_box</code> (put a box into the planning scene, or take it out).</p>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>cd code/b4-moveit
+colcon build
+source install/setup.bash</code></pre>
+<p>The build takes longer than B2 and B3 (it compiles against MoveIt) and ends with the usual <code>Finished &lt;&lt;&lt; b4_moveit</code>. The C++ compiler may print notes about an obsolete header or a deprecated package: they are harmless.</p>
+</li>
+
+<li>
+<h3>Start MoveIt on the fake arm</h3>
+<p>Close any <code>gen3.launch.py</code> from an earlier lesson (Ctrl+C in its terminal): this launch starts its own <code>ros2_control</code>, and two would clash. Then open a <strong>new terminal</strong> (<strong>T2</strong>), enter a container, and start the MoveIt launch file that ships with the Kinova packages. It starts everything: the fake arm (as in A7), the controllers, <code>robot_state_publisher</code>, <code>move_group</code> and RViz with the MoveIt panel.</p>
+<p class="env docker"><span class="where host">host</span> T2:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>ros2 launch kinova_gen3_7dof_robotiq_2f_85_moveit_config robot.launch.py robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true</code></pre>
+<p>Wait for this line, in green (about 10 seconds):</p>
+<pre class="out">[move_group-7] You can start planning now!</pre>
+<p>An RViz window opens with the arm. In the same output you will see a few messages that look bad and are not: <code>Could not enable FIFO RT scheduling policy</code> (the real-time priority, not needed for a fake arm), <code>No 3D sensor plugin(s) defined for octomap updates</code> (no camera is connected, so no occupancy map), <code>Overrun detected</code> during start-up, <code>Action server: /recognize_objects not available</code> from RViz (an optional object-recognition feature), a long <code>SEVERE WARNING ... namespace collision</code> about an RViz plugin, and <code>No active joints or end effectors found for group 'gripper'</code> (RViz starts with the Planning Group set to <code>gripper</code>, see the picture below).</p>
+<p>When you stop the launch with Ctrl+C, <code>move_group</code> may end with a stack trace and <code>Segmentation fault</code>. It happens while shutting down, after everything has stopped, and did not affect anything in this lesson. (I saw it in a reader's run; I did not investigate the cause.)</p>
+<div class="callout warn"><strong class="t">RViz does not open?</strong>
+<p>If T2 prints <code>Unable to create a suitable GLXContext</code> and RViz dies, the container cannot get OpenGL from your display (a missing GPU toolkit, a remote or virtual display). Everything else in this lesson still works without the window, since the programs talk to <code>move_group</code>, not to RViz. Add <code>launch_rviz:=false</code> to the command to start without it. (I did not test software rendering on a machine with this problem.)</p></div>
+<figure>
+<img src="img/b4-box-rviz.png" alt="RViz with the MoveIt MotionPlanning panel; the arm reaches toward a green box">
+<figcaption>The MoveIt RViz window, as it will look at the end of step 5 (with a green box in the scene). The left panels are MoveIt's: <em>Planning</em> has the Plan and Execute buttons. The camera shows only part of the box. Note the <em>Planning Group</em> box: it starts on <code>gripper</code>, change it to <code>manipulator</code> before you plan for the arm.</figcaption>
+</figure>
+</li>
+
+<li>
+<h3>See what <code>move_group</code> offers</h3>
+<p>Open another <strong>new terminal</strong> (<strong>T3</strong>), enter a container with <code>docker/run_ros2.sh</code> (local install: just a terminal), and look at the ROS graph the way you did in A1 to A3.</p>
+<p><span class="where box">container</span> T3:</p>
+<pre class="cmd"><code>ros2 action list -t | grep -E "move_action|execute_traj"
+ros2 service list | grep -E "^/(compute_ik|compute_fk|plan_kinematic_path|apply_planning_scene|get_planning_scene|compute_cartesian_path)$"
+ros2 topic list | grep -E "planning_scene|display_planned|monitored"</code></pre>
+<pre class="out">/execute_trajectory [moveit_msgs/action/ExecuteTrajectory]
+/move_action [moveit_msgs/action/MoveGroup]
+/apply_planning_scene
+/compute_cartesian_path
+/compute_fk
+/compute_ik
+/get_planning_scene
+/plan_kinematic_path
+/display_planned_path
+/monitored_planning_scene
+/planning_scene
+/planning_scene_world</pre>
+<p>That is the whole interface. The two programs of this lesson use two of these:</p>
+<ul>
+<li><code>move_pose</code> uses the action <strong><code>/move_action</code></strong>: one goal that says "plan and (optionally) execute".</li>
+<li><code>add_box</code> uses the service <strong><code>/apply_planning_scene</code></strong>: it changes the world MoveIt knows.</li>
+</ul>
+<p>The others you can call from the command line. For example <code>/compute_ik</code> is MoveIt's own IK, the same job as <code>ik_gen3</code> of B3. Ask it for the hand pose of B2's reference joints (the quaternion is the same orientation as roll, pitch, yaw of −60.494°, 18.394°, −64.003°):</p>
+<pre class="cmd"><code>ros2 service call /compute_ik moveit_msgs/srv/GetPositionIK "{ik_request: {group_name: manipulator, pose_stamped: {header: {frame_id: base_link}, pose: {position: {x: 0.674, y: -0.030, z: 0.649}, orientation: {x: -0.3485, y: 0.3806, z: -0.3836, w: 0.7658}}}, timeout: {sec: 1}}}"</code></pre>
+<p>The answer is long. These are the parts that matter (the names and values are in the <code>solution</code>, the success code is <code>error_code</code>; I removed the rest):</p>
+<pre class="out">solution: joint_1 … joint_7 =
+  -0.1386  0.6000  0.4164  1.2238  0.4005  -0.8666  0.4881
+error_code: val=1</pre>
+<p><code>val=1</code> is <code>SUCCESS</code>. Compare with B3: this is another member of the <em>family</em>. It is not the (0.3, 0.6, −0.4, 1.2, 0.5, −0.7, 0.9) of B2 (joint 1 is −0.139 here, joint 3 is 0.416, joint 7 is 0.488), yet I put these seven values through <code>fk_gen3</code> of B2 and the hand comes out at [0.674, −0.030, 0.649], RPY (−60.489°, 18.395°, −63.997°). Which member the solver returns depends on where it starts.</p>
+</li>
+
+<li>
+<h3>Plan and move to a pose</h3>
+<p><code>move_pose</code> sends one goal to <code>/move_action</code>: group <code>manipulator</code>, the hand (<code>end_effector_link</code>) at a pose in the frame <code>base_link</code> (as in B2). MoveIt takes the pose as constraints: the position within 1 mm of the target, each axis of the orientation within 0.01 rad. It takes the orientation as a quaternion (four numbers that describe a rotation); the program converts your roll, pitch, yaw. Speed and acceleration are limited to 30% of the maximum, so the motion is easy to watch.</p>
+<div class="lang py">
+<pre class="src" data-file="code/b4-moveit/py/move_pose.py"><code>#!/usr/bin/env python3
+"""Ask MoveIt to move the hand to a pose: move_pose X Y Z ROLL PITCH YAW  (metres, degrees)."""
+import math
+import sys
+
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from geometry_msgs.msg import Pose
+from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import (BoundingVolume, Constraints, MoveItErrorCodes,
+                             OrientationConstraint, PositionConstraint)
+from shape_msgs.msg import SolidPrimitive
+
+GROUP = "manipulator"
+BASE = "base_link"
+TIP = "end_effector_link"
+
+
+def quaternion_from_rpy(roll, pitch, yaw):
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (sr * cp * cy - cr * sp * sy,   # x
+            cr * sp * cy + sr * cp * sy,   # y
+            cr * cp * sy - sr * sp * cy,   # z
+            cr * cp * cy + sr * sp * sy)   # w
+
+
+def error_name(code):
+    for name in dir(MoveItErrorCodes):
+        if name.isupper() and getattr(MoveItErrorCodes, name) == code:
+            return name
+    return str(code)
+
+
+def main():
+    if len(sys.argv) != 7:
+        sys.exit("usage: move_pose X Y Z ROLL PITCH YAW   (metres, degrees)")
+    x, y, z = map(float, sys.argv[1:4])
+    roll, pitch, yaw = (math.radians(float(a)) for a in sys.argv[4:7])
+
+    rclpy.init()
+    node = Node("move_pose")
+    client = ActionClient(node, MoveGroup, "move_action")
+    if not client.wait_for_server(timeout_sec=10.0):
+        sys.exit("no /move_action: is move_group running?")
+
+    target = Pose()
+    target.position.x, target.position.y, target.position.z = x, y, z
+    qx, qy, qz, qw = quaternion_from_rpy(roll, pitch, yaw)
+    target.orientation.x, target.orientation.y = qx, qy
+    target.orientation.z, target.orientation.w = qz, qw
+
+    # position: the hand origin must lie inside a 1 mm sphere around the target
+    sphere = SolidPrimitive(type=SolidPrimitive.SPHERE, dimensions=[0.001])
+    position = PositionConstraint()
+    position.header.frame_id = BASE
+    position.link_name = TIP
+    position.constraint_region = BoundingVolume(primitives=[sphere], primitive_poses=[target])
+    position.weight = 1.0
+    # orientation: each axis within 0.01 rad of the target
+    orientation = OrientationConstraint()
+    orientation.header.frame_id = BASE
+    orientation.link_name = TIP
+    orientation.orientation = target.orientation
+    orientation.absolute_x_axis_tolerance = 0.01
+    orientation.absolute_y_axis_tolerance = 0.01
+    orientation.absolute_z_axis_tolerance = 0.01
+    orientation.weight = 1.0
+
+    goal = MoveGroup.Goal()
+    goal.request.group_name = GROUP
+    goal.request.num_planning_attempts = 5
+    goal.request.allowed_planning_time = 5.0
+    goal.request.max_velocity_scaling_factor = 0.3
+    goal.request.max_acceleration_scaling_factor = 0.3
+    goal.request.goal_constraints = [Constraints(position_constraints=[position],
+                                                 orientation_constraints=[orientation])]
+    goal.planning_options.plan_only = False   # plan AND execute
+
+    send = client.send_goal_async(goal)
+    rclpy.spin_until_future_complete(node, send)
+    handle = send.result()
+    if not handle.accepted:
+        sys.exit("goal rejected")
+    done = handle.get_result_async()
+    rclpy.spin_until_future_complete(node, done)
+    result = done.result().result
+    print(f"result: {error_name(result.error_code.val)}")
+    points = result.planned_trajectory.joint_trajectory.points
+    if points:
+        last = points[-1]
+        print(f"trajectory: {len(points)} points, {last.time_from_start.sec + last.time_from_start.nanosec * 1e-9:.2f} s")
+    node.destroy_node()
+    rclpy.shutdown()
+    sys.exit(0 if result.error_code.val == MoveItErrorCodes.SUCCESS else 1)
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/b4-moveit/cpp/move_pose.cpp"><code>// Ask MoveIt to move the hand to a pose: move_pose X Y Z ROLL PITCH YAW  (metres, degrees)
+#include &lt;cmath&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;memory&gt;
+#include &lt;thread&gt;
+
+#include &lt;geometry_msgs/msg/pose.hpp&gt;
+#include &lt;moveit/move_group_interface/move_group_interface.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;tf2/LinearMath/Quaternion.h&gt;
+
+int main(int argc, char** argv)
+{
+  rclcpp::init(argc, argv);
+  if (argc != 7) {
+    std::fprintf(stderr, "usage: move_pose X Y Z ROLL PITCH YAW   (metres, degrees)\n");
+    return 2;
+  }
+  const double x = std::atof(argv[1]), y = std::atof(argv[2]), z = std::atof(argv[3]);
+  const double deg = M_PI / 180.0;
+  tf2::Quaternion q;
+  q.setRPY(std::atof(argv[4]) * deg, std::atof(argv[5]) * deg, std::atof(argv[6]) * deg);
+
+  auto node = std::make_shared&lt;rclcpp::Node&gt;("move_pose");
+  // MoveGroupInterface needs the node to be spinning, so spin it in a thread
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread spinner([&amp;executor]() { executor.spin(); });
+
+  moveit::planning_interface::MoveGroupInterface group(node, "manipulator");
+  group.setEndEffectorLink("end_effector_link");
+  group.setPoseReferenceFrame("base_link");
+  group.setNumPlanningAttempts(5);
+  group.setPlanningTime(5.0);
+  group.setMaxVelocityScalingFactor(0.3);
+  group.setMaxAccelerationScalingFactor(0.3);
+
+  geometry_msgs::msg::Pose target;
+  target.position.x = x;
+  target.position.y = y;
+  target.position.z = z;
+  target.orientation.x = q.x();
+  target.orientation.y = q.y();
+  target.orientation.z = q.z();
+  target.orientation.w = q.w();
+  group.setPoseTarget(target);
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  const auto planned = group.plan(plan);
+  int status = 1;
+  if (planned == moveit::core::MoveItErrorCode::SUCCESS) {
+    const auto&amp; pts = plan.trajectory.joint_trajectory.points;
+    const auto&amp; last = pts.back().time_from_start;
+    const auto executed = group.execute(plan);
+    std::printf("result: %s\n", executed == moveit::core::MoveItErrorCode::SUCCESS ? "SUCCESS" : "EXECUTION FAILED");
+    std::printf("trajectory: %zu points, %.2f s\n", pts.size(), last.sec + last.nanosec * 1e-9);
+    status = executed == moveit::core::MoveItErrorCode::SUCCESS ? 0 : 1;
+  } else {
+    std::printf("result: PLANNING FAILED (error code %d)\n", planned.val);
+  }
+  executor.cancel();
+  spinner.join();
+  rclcpp::shutdown();
+  return status;
+}</code></pre>
+<p>The C++ program uses <code>MoveGroupInterface</code>, MoveIt's C++ wrapper over the same action: it builds the goal for you. It needs its node to spin in another thread while the program waits for the plan.</p>
+</div>
+<p>MoveIt's Python package (<code>moveit_py</code>) is not part of the image, so the Python version talks to the action directly. The C++ wrapper and this Python code send the same message.</p>
+<p>Go to the two poses of B2 and B3 (hand poses at joint 1 = 0.3 and = −0.8 rad), <strong>A</strong> and <strong>B</strong>, and back. Watch RViz while it moves. <span class="where box">container</span> T3:</p>
+<div class="lang py"><pre class="cmd"><code>cd /workspace/code/b4-moveit
+source install/setup.bash
+ros2 run b4_moveit move_pose.py 0.674 -0.030 0.649 -60.494 18.394 -64.003
+ros2 run b4_moveit move_pose.py 0.332 0.588 0.649 -60.494 18.394 -0.977
+ros2 run b4_moveit move_pose.py 0.674 -0.030 0.649 -60.494 18.394 -64.003</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>cd /workspace/code/b4-moveit
+source install/setup.bash
+ros2 run b4_moveit move_pose 0.674 -0.030 0.649 -60.494 18.394 -64.003
+ros2 run b4_moveit move_pose 0.332 0.588 0.649 -60.494 18.394 -0.977
+ros2 run b4_moveit move_pose 0.674 -0.030 0.649 -60.494 18.394 -64.003</code></pre></div>
+<p>Each run takes a few seconds: it plans, then the arm moves in RViz. The three results (Python; the point counts and times vary from run to run, it is a random planner):</p>
+<pre class="out">result: SUCCESS
+trajectory: 32 points, 3.08 s
+result: SUCCESS
+trajectory: 29 points, 2.72 s
+result: SUCCESS
+trajectory: 22 points, 2.07 s</pre>
+<div class="lang cpp"><p>The C++ program also shows MoveIt's own log lines in front of each result (<code>Planning request accepted</code>, <code>Execute request success!</code> and so on), and one warning, <code>No kinematics plugins defined</code>, which is about the client side and is harmless. The last two lines of each run are the ones above (C++: 32 points 3.08 s, 29 points 2.73 s, 22 points 2.09 s).</p></div>
+<p>Now the check, as in B2: where does ROS say the hand is? In T3, while the arm sits at pose B (the second run):</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">- Translation: [0.332, 0.588, 0.649]
+- Rotation: in RPY (degree) [-60.459, 18.425, -0.965]</pre>
+<p>(Stop it with Ctrl+C. This output is from the C++ run; the Python run lands in the same place.) The target was <code>0.332 0.588 0.649</code> and RPY <code>−60.494 18.394 −0.977</code>: the hand is within a millimetre and a tenth of a degree, as the tolerances allow. The chain of lessons closes here: you wrote a hand pose; MoveIt did the IK (B3), the planning and the timing; the controller of A7 moved the joints; the frames of B2 and A6 report where the hand is.</p>
+</li>
+
+<li>
+<h3>Add a box and plan again</h3>
+<p>The straight way from A to B swings the arm around its base, through the empty space. Now put a box in that space. <code>add_box</code> builds a <code>CollisionObject</code> (a name, a box shape with three sizes, and a pose in <code>base_link</code>) and sends it in a <code>PlanningScene</code> message with <code>is_diff = true</code>, which means "change the scene, do not replace it". The same program with <code>remove</code> takes it out.</p>
+<div class="lang py">
+<pre class="src" data-file="code/b4-moveit/py/add_box.py"><code>#!/usr/bin/env python3
+"""Put a box into the planning scene: add_box NAME X Y Z SX SY SZ   or   add_box NAME remove"""
+import sys
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Pose
+from moveit_msgs.msg import CollisionObject, PlanningScene
+from moveit_msgs.srv import ApplyPlanningScene
+from shape_msgs.msg import SolidPrimitive
+
+
+def main():
+    args = sys.argv[1:]
+    if not (len(args) == 7 or (len(args) == 2 and args[1] == "remove")):
+        sys.exit("usage: add_box NAME X Y Z SX SY SZ   |   add_box NAME remove")
+    name = args[0]
+
+    obj = CollisionObject()
+    obj.header.frame_id = "base_link"
+    obj.id = name
+    if args[1] == "remove":
+        obj.operation = CollisionObject.REMOVE
+    else:
+        x, y, z, sx, sy, sz = map(float, args[1:7])
+        obj.primitives = [SolidPrimitive(type=SolidPrimitive.BOX, dimensions=[sx, sy, sz])]
+        pose = Pose()
+        pose.position.x, pose.position.y, pose.position.z = x, y, z
+        pose.orientation.w = 1.0
+        obj.primitive_poses = [pose]
+        obj.operation = CollisionObject.ADD
+
+    scene = PlanningScene()
+    scene.is_diff = True                    # change the scene, do not replace it
+    scene.world.collision_objects = [obj]
+
+    rclpy.init()
+    node = Node("add_box")
+    client = node.create_client(ApplyPlanningScene, "apply_planning_scene")
+    if not client.wait_for_service(timeout_sec=10.0):
+        sys.exit("no /apply_planning_scene: is move_group running?")
+    future = client.call_async(ApplyPlanningScene.Request(scene=scene))
+    rclpy.spin_until_future_complete(node, future)
+    print("scene updated" if future.result().success else "scene update failed")
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/b4-moveit/cpp/add_box.cpp"><code>// Put a box into the planning scene: add_box NAME X Y Z SX SY SZ   or   add_box NAME remove
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;cstring&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;thread&gt;
+#include &lt;vector&gt;
+
+#include &lt;geometry_msgs/msg/pose.hpp&gt;
+#include &lt;moveit/planning_scene_interface/planning_scene_interface.hpp&gt;
+#include &lt;moveit_msgs/msg/collision_object.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;shape_msgs/msg/solid_primitive.hpp&gt;
+
+int main(int argc, char** argv)
+{
+  rclcpp::init(argc, argv);
+  const bool remove = argc == 3 &amp;&amp; std::strcmp(argv[2], "remove") == 0;
+  if (!(argc == 8 || remove)) {
+    std::fprintf(stderr, "usage: add_box NAME X Y Z SX SY SZ   |   add_box NAME remove\n");
+    return 2;
+  }
+  const std::string name = argv[1];
+
+  auto node = std::make_shared&lt;rclcpp::Node&gt;("add_box");
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread spinner([&amp;executor]() { executor.spin(); });
+
+  moveit::planning_interface::PlanningSceneInterface scene;
+  bool ok = true;
+  if (remove) {
+    scene.removeCollisionObjects({name});
+  } else {
+    moveit_msgs::msg::CollisionObject obj;
+    obj.header.frame_id = "base_link";
+    obj.id = name;
+    shape_msgs::msg::SolidPrimitive box;
+    box.type = box.BOX;
+    box.dimensions = {std::atof(argv[5]), std::atof(argv[6]), std::atof(argv[7])};
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = std::atof(argv[2]);
+    pose.position.y = std::atof(argv[3]);
+    pose.position.z = std::atof(argv[4]);
+    pose.orientation.w = 1.0;
+    obj.primitives.push_back(box);
+    obj.primitive_poses.push_back(pose);
+    obj.operation = obj.ADD;
+    ok = scene.applyCollisionObjects({obj});
+  }
+  std::printf(ok ? "scene updated\n" : "scene update failed\n");
+  executor.cancel();
+  spinner.join();
+  rclcpp::shutdown();
+  return ok ? 0 : 1;
+}</code></pre>
+<p>The C++ version uses MoveIt's <code>PlanningSceneInterface</code>, which sends the same message.</p>
+</div>
+<p>The box is 0.15 m by 0.3 m by 0.8 m, centred on the point halfway along the swing, (0.59, 0.327, 0.65). First go back to A (you already did), then add the box and ask for B again. <span class="where box">container</span> T3:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b4_moveit add_box.py wall 0.59 0.327 0.65 0.15 0.3 0.8
+ros2 run b4_moveit move_pose.py 0.332 0.588 0.649 -60.494 18.394 -0.977</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b4_moveit add_box wall 0.59 0.327 0.65 0.15 0.3 0.8
+ros2 run b4_moveit move_pose 0.332 0.588 0.649 -60.494 18.394 -0.977</code></pre></div>
+<pre class="out">scene updated
+result: SUCCESS
+trajectory: 81 points, 7.92 s</pre>
+<p>A green box appears in RViz (that is the picture of step 2). The same goal as before, the same start, but the trajectory now has <strong>81 points and 7.92 s</strong> instead of 29 points and 2.72 s: the planner had to go around the box, and so it took a longer way. (C++ gave 87 points and 8.59 s: another random path.) The hand still ends at B, because the box is not on the target, only on the way.</p>
+<p>Take the box out and the short path is back:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b4_moveit add_box.py wall remove</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b4_moveit add_box wall remove</code></pre></div>
+<pre class="out">scene updated</pre>
+<p>Run it again and it says <code>scene update failed</code>: there is no <code>wall</code> any more, and removing something that is not there is an error.</p>
+</li>
+
+<li>
+<h3>The same in RViz, with the mouse</h3>
+<div class="callout warn"><strong class="t">Not run by the author</strong>
+<p>I could not click in RViz from my test setup, so this step is described from the panel and the source, and not from a run. Tell me where it differs.</p></div>
+<p>The MoveIt panel in RViz does by hand what the programs do. In the <em>MotionPlanning</em> panel, tab <em>Planning</em>:</p>
+<ol>
+<li>Set <em>Planning Group</em> to <code>manipulator</code>.</li>
+<li>Grab the interactive marker on the hand in the 3D view, and drag or rotate it. The orange arm is the <em>goal</em> state.</li>
+<li>Press <em>Plan</em> to see the path, <em>Execute</em> to run it, or <em>Plan &amp; Execute</em> for both. Under <em>Scene Objects</em> you can add boxes the same way <code>add_box</code> does.</li>
+</ol>
+<p>The marker is the same thing as the target of <code>move_pose</code>, and <em>Plan &amp; Execute</em> sends the same request to the same action.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<ul>
+<li>T2 printed <code>You can start planning now!</code> and <code>/move_action</code> is in the action list.</li>
+<li>Each <code>move_pose</code> printed <code>result: SUCCESS</code> and <code>tf2_echo</code> shows the hand at the target, within a millimetre.</li>
+<li>With the box, the same goal gives a longer trajectory (more points, more seconds), and without it the short one is back.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Put a box <em>around the goal</em>: a 0.2 m cube centred on pose B (0.332, 0.588, 0.649). Ask for B. What does <code>move_pose</code> print, and how long does it take? Where can you read why? Remove the box afterwards.</p>
+<details>
+<summary>Answer</summary>
+<div class="lang py"><pre class="cmd"><code>ros2 run b4_moveit add_box.py cage 0.332 0.588 0.649 0.2 0.2 0.2
+ros2 run b4_moveit move_pose.py 0.332 0.588 0.649 -60.494 18.394 -0.977
+ros2 run b4_moveit add_box.py cage remove</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b4_moveit add_box cage 0.332 0.588 0.649 0.2 0.2 0.2
+ros2 run b4_moveit move_pose 0.332 0.588 0.649 -60.494 18.394 -0.977
+ros2 run b4_moveit add_box cage remove</code></pre></div>
+<pre class="out">scene updated
+result: FAILURE
+scene updated</pre>
+<div class="lang cpp"><p>In C++ the middle line is <code>result: PLANNING FAILED (error code 99999)</code>, after an <code>[ERROR] ... MoveGroupInterface::plan() failed or timeout reached</code> line.</p></div>
+<p>The run takes about five seconds (the planning time limit of the program) and exits with status 1. <code>99999</code> is the generic <code>FAILURE</code> code: it says that planning failed, not why. The reason is in T2, the terminal of <code>move_group</code>: <code>Unable to sample any valid states for goal tree</code>. The goal itself is inside the box, so every pose MoveIt tries for it is in collision, and the planner cannot even start from the goal side. The lesson of this exercise: a failed plan is an answer, not a crash; read the <code>move_group</code> terminal, which says more than the error code.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li><strong>MoveIt</strong> is a set of pieces around the node <code>move_group</code>. You send a goal and it plans, times and executes a trajectory through the controller of A7.</li>
+<li>The <strong>SRDF</strong> defines the <strong>planning groups</strong> (<code>manipulator</code>, <code>gripper</code>) and named poses; every request names a group.</li>
+<li>The <strong>planning scene</strong> is the world MoveIt checks: the robot's joints plus <strong>collision objects</strong>. What is not in the scene does not exist for the planner.</li>
+<li>A plan: IK for the goal (B3), a random search through joint space (OMPL), then timing within the speed limits. Random, so two runs differ.</li>
+<li>Interfaces: the action <code>/move_action</code> (plan and execute), the service <code>/apply_planning_scene</code>, and services such as <code>/compute_ik</code>, <code>/compute_fk</code> and <code>/plan_kinematic_path</code>.</li>
+<li>With a box in the way the same goal gave a longer path; with the goal inside a box it gave <code>FAILURE</code> and an explanation in the <code>move_group</code> log.</li>
+<li>The same launch file and programs work on the real arm: only <code>use_fake_hardware</code> and the real <code>robot_ip</code> change. That part is not tested here.</li>
+</ul>
+
+<nav class="pager">
+<a href="b3-inverse-kinematics.html"><small>Previous</small>B3 · Inverse kinematics</a>
+<span class="soon next"><small>Next</small>B5 · Two arms in one scene (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
