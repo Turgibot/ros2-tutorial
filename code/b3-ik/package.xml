@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>b3_ik</name>
+  <version>0.1.0</version>
+  <description>Lesson B3: inverse kinematics and the null space of the Kinova Gen3 (Python and C++, no ROS code)</description>
+  <maintainer email="you@example.com">course</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>eigen</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

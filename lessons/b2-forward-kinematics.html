@@ -383,7 +383,7 @@ end_effector_link: matrix
 <p><span class="where box">container</span></p>
 <pre class="cmd"><code>ros2 launch kortex_bringup gen3.launch.py robot_ip:=yyy.yyy.yyy.yyy use_fake_hardware:=true gripper:=robotiq_2f_85</code></pre>
 <p>In <strong>T1</strong>, send the arm to a pose that is not a special case: all seven joints at different angles (A7's topic command, 3 seconds to get there):</p>
-<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.3, 0.6, -0.4, 1.2, 0.5, -0.7, 0.9], time_from_start: {sec: 3}}]}"</pre>
+<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.3, 0.6, -0.4, 1.2, 0.5, -0.7, 0.9], time_from_start: {sec: 3}}]}"</code></pre>
 <p>Wait for the arm to stop in RViz, then ask TF for the hand pose, and stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd> after the first block:</p>
 <pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
 <pre class="out">At time 1794143670.520992644
@@ -457,7 +457,7 @@ end_effector_link: matrix
 
 <nav class="pager">
 <a href="b1-the-arm.html"><small>Previous</small>B1 · The arm</a>
-<span class="soon next"><small>Next</small>B3 · Inverse kinematics (coming soon)</span>
+<a class="next" href="b3-inverse-kinematics.html"><small>Next</small>B3 · Inverse kinematics</a>
 </nav>
 </main>
 <footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>

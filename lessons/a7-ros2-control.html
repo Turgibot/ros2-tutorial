@@ -187,7 +187,7 @@ average rate: 1000.047
 <li>
 <h3>Move the arm: a trajectory on a topic</h3>
 <p>The trajectory controller listens on <code>/joint_trajectory_controller/joint_trajectory</code>, type <code>trajectory_msgs/msg/JointTrajectory</code>. A trajectory is a list of <strong>points</strong>. Each point has <code>positions</code> (one angle per joint, in the order of <code>joint_names</code>) and a <code>time_from_start</code>: when the arm should be there. Send one point, 4 seconds away:</p>
-<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 4}}]}"</pre>
+<pre class="cmd"><code>ros2 topic pub --once /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 4}}]}"</code></pre>
 <p>The arm in RViz moves smoothly to a bent pose and stops after four seconds. Look at the angles, and then at the hand with the tool of A6, once the move is over:</p>
 <pre class="cmd"><code>ros2 topic echo /joint_states --once --field position
 ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
@@ -208,7 +208,7 @@ A topic has no answer: if the angles are wrong or too far away, the controller s
 <h3>Move the arm: the same, as an action</h3>
 <p>The same controller also offers an <strong>action</strong> (A3): <code>/joint_trajectory_controller/follow_joint_trajectory</code>, type <code>control_msgs/action/FollowJointTrajectory</code>. Its goal contains the same trajectory. You get an accepted/rejected answer, <strong>feedback</strong> while it moves and a <strong>result</strong> when it ends. Look at it, then send a goal (send the arm back to zero first, if you want to see it move, with the same topic command and <code>positions</code> all <code>0.0</code>):</p>
 <pre class="cmd"><code>ros2 action info /joint_trajectory_controller/follow_joint_trajectory
-ros2 action send_goal --feedback /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 3}}]}}"</pre>
+ros2 action send_goal --feedback /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.5, 0.5, 0.0, -1.0, 0.0, 0.5, 0.0], time_from_start: {sec: 3}}]}}"</code></pre>
 <pre class="out">Action: /joint_trajectory_controller/follow_joint_trajectory
 Action clients: 0
 Action servers: 1

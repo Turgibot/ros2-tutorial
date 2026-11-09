@@ -53,7 +53,7 @@ Rules: one new idea at a time; nothing used before it is taught; every number/fo
   (Measured: the full workspace is 76 packages, about 3.5 minutes to compile on 32 cores; the image is 8.65 GB.)
 - B1 The arm: 7 joints, redundancy, joint limits, gripper; read the URDF (`dof:=7`, `gripper:=robotiq_2f_85`) and see it in RViz. Written and run (B1: no code folder; sliders, TF check of joint axes and the URDF limits all run; the limits in the `<ros2_control>` section differ from the URDF ones, noted in the lesson).
 - B2 Forward kinematics by hand for a 2-link case, then the Gen3 in TF; what "end effector pose" means. Written and run (B2: `code/b2-fk`, `fk2` and `fk_gen3` in Python and C++; `fk_gen3` matches `tf2_echo base_link end_effector_link` for 8 poses, translation, RPY and the 4x4 matrix).
-- B3 Inverse kinematics and why 7 DoF has many solutions (the null space).
+- B3 Inverse kinematics and why 7 DoF has many solutions (the null space). Written and run (B3: `code/b3-ik`, `ik2`, `ik_gen3` (damped least squares, numeric Jacobian) and `null_motion` in Python and C++, outputs identical; two IK solutions sent to the fake arm give the same `tf2_echo` pose, screenshots of both).
 - B4 MoveIt 2: planning groups, planning scene, collision objects; plan and execute with fake hardware
   (`use_fake_hardware:=true`, the shipped `kinova_gen3_7dof_robotiq_2f_85_moveit_config`).
 - B5 Two arms in one scene: two groups, namespaces, a shared collision world (`kortex_dual_robots.xacro`, joint-name

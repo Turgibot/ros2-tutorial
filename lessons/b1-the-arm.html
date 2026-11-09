@@ -96,7 +96,7 @@ root Link: world has 1 child(ren)
                                             child(3):  robotiq_85_right_inner_knuckle_link
                                             child(4):  robotiq_85_right_knuckle_link
                                                 child(1):  robotiq_85_right_finger_link
-                                                    child(1):  robotiq_85_right_finger_tip_link</code></pre>
+                                                    child(1):  robotiq_85_right_finger_tip_link</pre>
 <p>This is the TF tree of A6, before anything moves. The arm is a single chain: <code>world</code>, <code>base_link</code>, then seven more links up to <code>bracelet_link</code> and the hand frame <code>end_effector_link</code>. The gripper hangs off the end and splits into a left and a right finger.</p>
 </li>
 
@@ -121,7 +121,7 @@ root Link: world has 1 child(ren)
 593:  &lt;joint name="robotiq_85_left_inner_knuckle_joint" type="revolute"&gt;
 601:  &lt;joint name="robotiq_85_right_inner_knuckle_joint" type="revolute"&gt;
 609:  &lt;joint name="robotiq_85_left_finger_tip_joint" type="revolute"&gt;
-617:  &lt;joint name="robotiq_85_right_finger_tip_joint" type="revolute"&gt;</code></pre>
+617:  &lt;joint name="robotiq_85_right_finger_tip_joint" type="revolute"&gt;</pre>
 <p>18 joints. Three are plain placements (<code>base_joint</code>, <code>end_effector</code> and the gripper's <code>robotiq_85_base_joint</code>), seven are the arm (<code>joint_1</code> to <code>joint_7</code>, alternating continuous and revolute, as in the table), and the rest belong to the gripper. The two fixed <code>..._finger_joint</code> entries just glue a finger onto its knuckle.</p>
 </li>
 
@@ -135,7 +135,7 @@ root Link: world has 1 child(ren)
     &lt;child link="half_arm_1_link"/&gt;
     &lt;axis xyz="0 0 1"/&gt;
     &lt;limit effort="39" lower="-2.24" upper="2.24" velocity="1.3963"/&gt;
-  &lt;/joint&gt;</code></pre>
+  &lt;/joint&gt;</pre>
 <p>Line by line:</p>
 <ul>
 <li><code>parent</code> and <code>child</code>: this joint connects <code>shoulder_link</code> to <code>half_arm_1_link</code>.</li>
@@ -157,7 +157,7 @@ root Link: world has 1 child(ren)
 599:    &lt;limit effort="50" lower="0.0" upper="0.8" velocity="0.5"/&gt;
 607:    &lt;limit effort="50" lower="-0.8" upper="0.0" velocity="0.5"/&gt;
 615:    &lt;limit effort="50" lower="-0.8" upper="0.0" velocity="0.5"/&gt;
-623:    &lt;limit effort="50" lower="0.0" upper="0.8" velocity="0.5"/&gt;</code></pre>
+623:    &lt;limit effort="50" lower="0.0" upper="0.8" velocity="0.5"/&gt;</pre>
 <p>Match the line numbers with the joints of step 2: lines 164, 222, 280 and 338 are joints 1, 3, 5 and 7, and they have <strong>no</strong> <code>lower</code>/<code>upper</code>, which is what <code>continuous</code> means. Lines 193, 251 and 309 are joints 2, 4 and 6, with the ranges in the table. Lines 573 onward are the gripper (0.8 rad is its largest knuckle angle).</p>
 </li>
 
@@ -172,7 +172,7 @@ root Link: world has 1 child(ren)
 </figure>
 <p>Look at what the node publishes, in a second terminal (<span class="env docker">run <code>docker/run_ros2.sh</code> there too</span><span class="env local">open another terminal</span>):</p>
 <pre class="cmd"><code>ros2 topic echo --once /joint_states --field name</code></pre>
-<pre class="out">['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6', 'joint_7', 'robotiq_85_left_knuckle_joint', 'robotiq_85_right_knuckle_joint', 'robotiq_85_left_inner_knuckle_joint', 'robotiq_85_right_inner_knuckle_joint', 'robotiq_85_left_finger_tip_joint', 'robotiq_85_right_finger_tip_joint']</code></pre>
+<pre class="out">['joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6', 'joint_7', 'robotiq_85_left_knuckle_joint', 'robotiq_85_right_knuckle_joint', 'robotiq_85_left_inner_knuckle_joint', 'robotiq_85_right_inner_knuckle_joint', 'robotiq_85_left_finger_tip_joint', 'robotiq_85_right_finger_tip_joint']</pre>
 <p>13 joint names: the 7 arm joints and the 6 gripper joints (the fixed joints do not appear: they never move). Now drag the sliders, one at a time, back to 0 between tries, and write down what each one does:</p>
 <ul>
 <li><code>joint_1</code>: the whole arm turns around the vertical line through the base. Its slider runs from −3.14 to +3.14 (−π to +π), the node's range for a joint with no limit: the joint itself could turn further.</li>
@@ -197,7 +197,7 @@ root Link: world has 1 child(ren)
 598:    &lt;mimic joint="robotiq_85_left_knuckle_joint"/&gt;
 606:    &lt;mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1"/&gt;
 614:    &lt;mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1"/&gt;
-622:    &lt;mimic joint="robotiq_85_left_knuckle_joint"/&gt;</code></pre>
+622:    &lt;mimic joint="robotiq_85_left_knuckle_joint"/&gt;</pre>
 <p>Five joints copy the left knuckle. A missing <code>multiplier</code> means 1 (same angle), and <code>multiplier="-1"</code> means the opposite angle: the right finger closes by turning the other way, so its range in step 3 is −0.8 to 0. This is also why a ROS 2 gripper controller later needs to command only one joint, and why the gripper's ros2_control section in the URDF lists only <code>robotiq_85_left_knuckle_joint</code>.</p>
 <p>Close the viewer with <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal where you started it.</p>
 </li>
@@ -217,7 +217,7 @@ dof=7: 7 movable joints</pre>
       &lt;command_interface name="position"&gt;
         &lt;param name="min"&gt;-2.41&lt;/param&gt;
         &lt;param name="max"&gt;2.41&lt;/param&gt;
-      &lt;/command_interface&gt;</code></pre>
+      &lt;/command_interface&gt;</pre>
 <p>It says ±2.41 rad, while the <code>limit</code> element in step 3 said ±2.24. The two are not the same number, and they are used by different parts: tools that read the URDF joint limits (such as the sliders) use ±2.24, and the ros2_control section is read by the hardware component. The same is true for the other two bending joints (the control section has ±2.66 for <code>joint_4</code> and ±2.23 for <code>joint_6</code>, against ±2.57 and ±2.09). When you plan motion, keep to the tighter URDF numbers. We did not test what happens if a command goes between the two.</p>
 </details>
 </li>
@@ -245,7 +245,7 @@ dof=7: 7 movable joints</pre>
     &lt;child link="spherical_wrist_2_link"/&gt;
     &lt;axis xyz="0 0 1"/&gt;
     &lt;limit effort="9" lower="-2.09" upper="2.09" velocity="1.2218"/&gt;
-  &lt;/joint&gt;</code></pre>
+  &lt;/joint&gt;</pre>
 <p><code>effort="9"</code>: 9 N·m. <code>velocity="1.2218"</code> rad/s, and 1.2218 × 57.296 = 70.0°/s. Its range is ±2.09 rad = ±119.7°. A wrist joint is slower and weaker than a shoulder joint (80°/s and 39 N·m), which is why the table groups them this way.</p>
 </details>
 
