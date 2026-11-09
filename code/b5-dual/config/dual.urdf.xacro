@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!-- Two Kinova Gen3 arms in one robot description: the single-arm macro of kortex_description, used twice.
+     The prefix ("left_", "right_") goes in front of every link, joint and ros2_control name. -->
+<robot name="dual" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:arg name="use_fake_hardware" default="true"/>
+  <xacro:arg name="robot_ip" default="yyy.yyy.yyy.yyy"/>
+
+  <xacro:include filename="$(find kortex_description)/robots/kortex_robot.xacro"/>
+  <xacro:property name="initial_positions_file" value="$(find kortex_description)/config/initial_positions.yaml"/>
+
+  <link name="world"/>
+
+  <xacro:macro name="arm" params="prefix x yaw">
+    <xacro:load_robot
+      parent="world"
+      prefix="${prefix}"
+      arm="gen3"
+      dof="7"
+      vision="false"
+      gripper=""
+      gripper_joint_name=""
+      robot_ip="$(arg robot_ip)"
+      username="admin"
+      password="admin"
+      port="10000"
+      port_realtime="10001"
+      session_inactivity_timeout_ms="60000"
+      connection_inactivity_timeout_ms="2000"
+      use_fake_hardware="$(arg use_fake_hardware)"
+      initial_positions="${xacro.load_yaml(initial_positions_file)}">
+      <origin xyz="${x} 0 0" rpy="0 0 ${yaw}"/>
+    </xacro:load_robot>
+  </xacro:macro>
+
+  <!-- the arms stand 1 m apart and face each other -->
+  <xacro:arm prefix="left_"  x="-0.5" yaw="0"/>
+  <xacro:arm prefix="right_" x="0.5"  yaw="${pi}"/>
+</robot>

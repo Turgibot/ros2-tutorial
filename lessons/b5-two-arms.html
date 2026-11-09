@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B5 · Two arms</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part B · The Kinova Gen3</span></header>
+<main>
+
+<h1>B5 · Two arms in one scene</h1>
+<p class="lead">Two Gen3 arms, one robot description, one MoveIt. Each arm plans on its own, and MoveIt knows that the other arm is an obstacle.</p>
+
+<h2>1. Goal</h2>
+<p>The course ends with two arms working in the same space (parts D and E). In B4 you used one arm and one set of names: <code>joint_1</code>, <code>base_link</code>, the group <code>manipulator</code>. Two arms cannot share those names. This lesson shows what has to change, and it is less than you may expect: <strong>a prefix in front of every name</strong>, and a few files that list those names.</p>
+<p>At the end of this lesson you will have:</p>
+<ul>
+<li>built a robot description with two arms (<code>left_</code> and <code>right_</code>) standing 1 m apart and facing each other,</li>
+<li>started MoveIt with two planning groups, <code>left_arm</code> and <code>right_arm</code>, and one controller for each arm,</li>
+<li>moved each arm from a program, with poses in one shared frame, <code>world</code>,</li>
+<li>seen MoveIt refuse a goal for one arm because the hand of the other arm is already there,</li>
+<li>and seen what <code>START_STATE_INVALID</code> means, and how to recover from it.</li>
+</ul>
+
+<div class="callout warn"><strong class="t">Read this first: what is different here</strong>
+<p>The Kinova packages ship a file for two arms (<code>kortex_dual_robots.xacro</code>), but it does not work: it passes an argument (<code>sim</code>) that the arm macro no longer has, and <code>xacro</code> stops with <code>Invalid parameter "sim"</code>. There is also no MoveIt configuration for two arms. So the files of this lesson are <strong>written by this course</strong>, from the single-arm files, and they are not tested with a real pair of arms. The arms here have no gripper (to keep the lesson short), and they run on fake hardware.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>Names must be unique</h3>
+<p>ROS 2 identifies a joint, a link or a frame by its name. Two arms that both have <code>joint_1</code> would be one joint twice, which is an error. The arm macro of the Kinova description takes a <code>prefix</code> and puts it in front of every link, joint and hardware name. With <code>prefix="left_"</code> the first joint is <code>left_joint_1</code>, the base is <code>left_base_link</code>, the hand is <code>left_end_effector_link</code>. A second copy with <code>prefix="right_"</code> gives the right arm. Both hang from the same fixed link, <code>world</code>, at different places.</p>
+
+<h3>Which files hold names</h3>
+<p>Everything that mentions a joint or link by name must be told about both arms. For MoveIt and ros2_control that is a handful of files:</p>
+<table>
+<tr><th>File (in <code>code/b5-dual/config</code>)</th><th>What it says</th><th>What changed from one arm</th></tr>
+<tr><td><code>dual.urdf.xacro</code></td><td>the robot: links, joints, and one <code>ros2_control</code> block per arm</td><td>the arm macro used twice, with a prefix and a base position (this one is new)</td></tr>
+<tr><td><code>ros2_controllers.yaml</code></td><td>the controllers of ros2_control and their joints</td><td>one <code>joint_trajectory_controller</code> per arm, with prefixed joint names</td></tr>
+<tr><td><code>dual.srdf</code></td><td>planning groups, and which link pairs never collide</td><td>two groups (<code>left_arm</code>, <code>right_arm</code>); the "never collide" pairs once per arm</td></tr>
+<tr><td><code>kinematics.yaml</code></td><td>the IK solver of each group</td><td>one entry per group</td></tr>
+<tr><td><code>joint_limits.yaml</code></td><td>speed and acceleration limits per joint</td><td>every joint name prefixed</td></tr>
+<tr><td><code>ompl_planning.yaml</code></td><td>the planner settings per group</td><td>one section per group</td></tr>
+<tr><td><code>moveit_controllers.yaml</code></td><td>which controller executes a MoveIt trajectory</td><td>one entry per arm</td></tr>
+</table>
+<p>Only the first file is written by hand. The others come from the files that ship for one arm, by a short script (<code>scripts/make_config.py</code>, already run): it copies each file and puts the prefix in. You do not need to run it, but its source is below, so you can see exactly what "adding a prefix" means for each file.</p>
+
+<h3>One controller manager, or two?</h3>
+<p>There are two ways to run two arms. You can start <strong>one</strong> <code>controller_manager</code> that controls both arms (each arm has its own <code>joint_trajectory_controller</code>), or <strong>two</strong>, each in its own ROS namespace, as you would for two real robots with their own driver. This lesson uses one: it needs no namespaces, and everything stays visible in the same lists you know from A7. For two real arms, the <code>ros2_control</code> block of each arm has its own <code>robot_ip</code> in the description, so the same structure carries over. That is not tested here.</p>
+
+<h3>The shared planning scene</h3>
+<p>In B4 the planning scene held the robot and the boxes you added. Now the robot <em>is</em> both arms, so MoveIt checks every path of one arm against the other arm as well, wherever that arm happens to be. Nothing has to be configured for that: it comes from having both arms in one robot description. The group <code>right_arm</code> only decides which joints MoveIt moves; the left arm is still in the scene as an obstacle, standing at its current joint values.</p>
+
+<h3>One world frame</h3>
+<p>In B4 poses were given in <code>base_link</code>. With two bases, a pose "in the base frame" is ambiguous. The programs of this lesson take poses in <code>world</code>, the frame both bases are fixed to, so the same numbers mean the same place for both arms.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Get the programs and the configuration</h3>
+<p>The package <code>code/b5-dual</code> has the configuration, a launch file, and one program in Python and in C++, <code>move_arm</code>. Close the launch of B4 first (Ctrl+C in its terminal): two <code>ros2_control</code> instances would clash.</p>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span></p>
+<pre class="cmd"><code>cd code/b5-dual
+colcon build
+source install/setup.bash</code></pre>
+<p>The build ends with <code>Finished &lt;&lt;&lt; b5_dual</code>. As in B4, the compiler may print notes about a deprecated package: they are harmless.</p>
+</li>
+
+<li>
+<h3>The robot description with two arms</h3>
+<p>This is the only file written by hand. It uses the arm macro of the Kinova description twice. The <code>origin</code> inside each call is where that arm's base stands: the left arm at x = −0.5 m, the right arm at x = +0.5 m and turned by 180° (<code>pi</code>) around the vertical, so that it faces the left arm.</p>
+<pre class="src" data-file="code/b5-dual/config/dual.urdf.xacro"><code>&lt;?xml version="1.0"?&gt;
+&lt;!-- Two Kinova Gen3 arms in one robot description: the single-arm macro of kortex_description, used twice.
+     The prefix ("left_", "right_") goes in front of every link, joint and ros2_control name. --&gt;
+&lt;robot name="dual" xmlns:xacro="http://ros.org/wiki/xacro"&gt;
+  &lt;xacro:arg name="use_fake_hardware" default="true"/&gt;
+  &lt;xacro:arg name="robot_ip" default="yyy.yyy.yyy.yyy"/&gt;
+
+  &lt;xacro:include filename="$(find kortex_description)/robots/kortex_robot.xacro"/&gt;
+  &lt;xacro:property name="initial_positions_file" value="$(find kortex_description)/config/initial_positions.yaml"/&gt;
+
+  &lt;link name="world"/&gt;
+
+  &lt;xacro:macro name="arm" params="prefix x yaw"&gt;
+    &lt;xacro:load_robot
+      parent="world"
+      prefix="${prefix}"
+      arm="gen3"
+      dof="7"
+      vision="false"
+      gripper=""
+      gripper_joint_name=""
+      robot_ip="$(arg robot_ip)"
+      username="admin"
+      password="admin"
+      port="10000"
+      port_realtime="10001"
+      session_inactivity_timeout_ms="60000"
+      connection_inactivity_timeout_ms="2000"
+      use_fake_hardware="$(arg use_fake_hardware)"
+      initial_positions="${xacro.load_yaml(initial_positions_file)}"&gt;
+      &lt;origin xyz="${x} 0 0" rpy="0 0 ${yaw}"/&gt;
+    &lt;/xacro:load_robot&gt;
+  &lt;/xacro:macro&gt;
+
+  &lt;!-- the arms stand 1 m apart and face each other --&gt;
+  &lt;xacro:arm prefix="left_"  x="-0.5" yaw="0"/&gt;
+  &lt;xacro:arm prefix="right_" x="0.5"  yaw="${pi}"/&gt;
+&lt;/robot&gt;</code></pre>
+<p>Turn it into a URDF and look at its tree, as you did in B1. <span class="where box">container</span> T1:</p>
+<pre class="cmd"><code>xacro $(ros2 pkg prefix b5_dual)/share/b5_dual/config/dual.urdf.xacro &gt; /tmp/dual.urdf
+wc -l /tmp/dual.urdf
+grep -c "&lt;ros2_control" /tmp/dual.urdf
+check_urdf /tmp/dual.urdf</code></pre>
+<pre class="out">680 /tmp/dual.urdf
+2
+robot name is: dual
+---------- Successfully Parsed XML ---------------
+root Link: world has 2 child(ren)
+    child(1):  left_base_link
+        child(1):  left_shoulder_link
+            child(1):  left_half_arm_1_link
+                child(1):  left_half_arm_2_link
+                    child(1):  left_forearm_link
+                        child(1):  left_spherical_wrist_1_link
+                            child(1):  left_spherical_wrist_2_link
+                                child(1):  left_bracelet_link
+                                    child(1):  left_end_effector_link
+                                        child(1):  left_tool_frame
+    child(2):  right_base_link
+        child(1):  right_shoulder_link
+            child(1):  right_half_arm_1_link
+                child(1):  right_half_arm_2_link
+                    child(1):  right_forearm_link
+                        child(1):  right_spherical_wrist_1_link
+                            child(1):  right_spherical_wrist_2_link
+                                child(1):  right_bracelet_link
+                                    child(1):  right_end_effector_link
+                                        child(1):  right_tool_frame</pre>
+<p>One <code>world</code> link with two arms below it, one tree per arm, and two <code>ros2_control</code> blocks (one per arm). The file is 680 lines: B1's one-arm URDF was 625 lines with the gripper, and this one has no gripper.</p>
+</li>
+
+<li>
+<h3>The other files: a prefix everywhere</h3>
+<p>Open <code>code/b5-dual/config</code> and compare it with the single-arm MoveIt package. As an example, the file that tells MoveIt how to execute a trajectory had one entry in B4 and now has two:</p>
+<pre class="src" data-file="code/b5-dual/config/moveit_controllers.yaml"><code>moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - left_joint_trajectory_controller
+    - right_joint_trajectory_controller
+
+  left_joint_trajectory_controller:
+    type: FollowJointTrajectory
+    joints:
+      - left_joint_1
+      - left_joint_2
+      - left_joint_3
+      - left_joint_4
+      - left_joint_5
+      - left_joint_6
+      - left_joint_7
+    action_ns: follow_joint_trajectory
+    default: true
+
+  right_joint_trajectory_controller:
+    type: FollowJointTrajectory
+    joints:
+      - right_joint_1
+      - right_joint_2
+      - right_joint_3
+      - right_joint_4
+      - right_joint_5
+      - right_joint_6
+      - right_joint_7
+    action_ns: follow_joint_trajectory
+    default: true</code></pre>
+<p>The joint names carry the prefix, and each arm has its own controller (the controller names are the ones in <code>ros2_controllers.yaml</code>). The SRDF defines the groups:</p>
+<pre class="cmd"><code>head -8 $(ros2 pkg prefix b5_dual)/share/b5_dual/config/dual.srdf</code></pre>
+<pre class="out">&lt;?xml version="1.0"?&gt;
+&lt;robot name="dual"&gt;
+  &lt;group name="left_arm"&gt;
+    &lt;chain base_link="left_base_link" tip_link="left_end_effector_link"/&gt;
+  &lt;/group&gt;
+  &lt;group name="right_arm"&gt;
+    &lt;chain base_link="right_base_link" tip_link="right_end_effector_link"/&gt;
+  &lt;/group&gt;</pre>
+<details>
+<summary>How the files were made: <code>scripts/make_config.py</code></summary>
+<p>This is the script that produced six of the seven files from the single-arm ones. It is a good place to see what each file needs. (Run inside a container, because it reads <code>/opt/kortex_ws</code>.) One value is changed on purpose: the IK solver timeout (<code>kinematics_solver_timeout</code>) is 0.05 s instead of 0.005 s of the single-arm file; I raised it hoping for fewer odd solutions and I cannot tell from my runs that it made a difference.</p>
+<pre class="src" data-file="code/b5-dual/scripts/make_config.py"><code>#!/usr/bin/env python3
+"""Build the two-arm MoveIt config files from the single-arm ones that ship with the Kinova packages.
+
+Run it once (it is already run, the results are in config/):
+    python3 scripts/make_config.py
+It reads /opt/kortex_ws/.../kinova_gen3_7dof_robotiq_2f_85_moveit_config/config and writes into ../config.
+The idea of the whole lesson: every joint and link name gets a prefix, "left_" or "right_".
+"""
+import os
+import re
+
+SRC = ("/opt/kortex_ws/install/kinova_gen3_7dof_robotiq_2f_85_moveit_config/share/"
+       "kinova_gen3_7dof_robotiq_2f_85_moveit_config/config")
+DST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config")
+SIDES = ("left", "right")
+JOINTS = [f"joint_{i}" for i in range(1, 8)]
+
+
+def read(name):
+    with open(os.path.join(SRC, name)) as f:
+        return f.read()
+
+
+def write(name, text):
+    with open(os.path.join(DST, name), "w") as f:
+        f.write(text)
+    print("wrote config/" + name)
+
+
+# 1. SRDF: two groups, and the "never collide" pairs of the single arm, once per arm (no gripper in this lesson)
+pairs = [l for l in read("gen3.srdf").splitlines()
+         if "&lt;disable_collisions" in l and "robotiq" not in l]
+out = ['&lt;?xml version="1.0"?&gt;', '&lt;robot name="dual"&gt;']
+for s in SIDES:
+    out.append(f'  &lt;group name="{s}_arm"&gt;')
+    out.append(f'    &lt;chain base_link="{s}_base_link" tip_link="{s}_end_effector_link"/&gt;')
+    out.append('  &lt;/group&gt;')
+for s in SIDES:
+    out.append(f'  &lt;group_state name="Vertical" group="{s}_arm"&gt;')
+    out += [f'    &lt;joint name="{s}_{j}" value="0"/&gt;' for j in JOINTS]
+    out.append('  &lt;/group_state&gt;')
+for s in SIDES:
+    for l in pairs:
+        out.append(re.sub(r'link([12])="(\w+)"', lambda m: f'link{m.group(1)}="{s}_{m.group(2)}"', l.rstrip()))
+out.append('&lt;/robot&gt;')
+write("dual.srdf", "\n".join(out) + "\n")
+
+# 2. kinematics: one KDL solver per group
+write("kinematics.yaml", "".join(
+    f"{s}_arm:\n  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin\n"
+    "  kinematics_solver_search_resolution: 0.005\n  kinematics_solver_timeout: 0.05\n" for s in SIDES))
+
+# 3. joint limits: the single-arm values, with the prefix on every joint name
+lim = read("joint_limits.yaml").split("joint_limits:\n")
+head = lim[0]
+body = []
+for s in SIDES:
+    for j in JOINTS:
+        m = re.search(rf"  {j}:\n((?:    .*\n)+)", lim[1])
+        body.append(f"  {s}_{j}:\n{m.group(1)}")
+write("joint_limits.yaml", head + "joint_limits:\n" + "".join(body))
+
+# 4. OMPL: the group sections are renamed, the gripper section is dropped
+ompl = read("ompl_planning.yaml")
+i = ompl.index("\nmanipulator:")
+j = ompl.index("\ngripper:")
+section = ompl[i:j].strip("\n").replace("manipulator:", "{g}:", 1)
+write("ompl_planning.yaml", ompl[:i].rstrip("\n") + "\n\n" +
+      "\n\n".join(section.format(g=f"{s}_arm") for s in SIDES) + "\n")
+
+# 5. MoveIt -&gt; controller: one FollowJointTrajectory controller per arm
+ctl = "moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager\n\n"
+ctl += "moveit_simple_controller_manager:\n  controller_names:\n"
+ctl += "".join(f"    - {s}_joint_trajectory_controller\n" for s in SIDES)
+for s in SIDES:
+    ctl += f"\n  {s}_joint_trajectory_controller:\n    type: FollowJointTrajectory\n    joints:\n"
+    ctl += "".join(f"      - {s}_{j}\n" for j in JOINTS)
+    ctl += "    action_ns: follow_joint_trajectory\n    default: true\n"
+write("moveit_controllers.yaml", ctl)
+
+# 6. ros2_control: one controller manager, a joint trajectory controller per arm
+rc = "controller_manager:\n  ros__parameters:\n    update_rate: 1000  # Hz\n\n"
+rc += "    joint_state_broadcaster:\n      type: joint_state_broadcaster/JointStateBroadcaster\n"
+for s in SIDES:
+    rc += f"\n    {s}_joint_trajectory_controller:\n      type: joint_trajectory_controller/JointTrajectoryController\n"
+for s in SIDES:
+    rc += f"\n{s}_joint_trajectory_controller:\n  ros__parameters:\n    joints:\n"
+    rc += "".join(f"      - {s}_{j}\n" for j in JOINTS)
+    rc += ("    command_interfaces:\n      - position\n    state_interfaces:\n      - position\n      - velocity\n"
+           "    state_publish_rate: 100.0\n    action_monitor_rate: 20.0\n    allow_partial_joints_goal: false\n"
+           "    constraints:\n      stopped_velocity_tolerance: 0.0\n      goal_time: 0.0\n")
+write("ros2_controllers.yaml", rc)
+
+# 7. RViz: the single-arm MoveIt layout works as it is (Fixed Frame is "world")
+write("moveit.rviz", read("moveit.rviz"))</code></pre>
+</details>
+</li>
+
+<li>
+<h3>Start MoveIt with two arms</h3>
+<p>Open a <strong>new terminal</strong> (<strong>T2</strong>), enter a container, and start the launch file of this package. It is modelled on <code>robot.launch.py</code> of the single-arm MoveIt package (B4): <code>ros2_control</code> with the fake arms, <code>robot_state_publisher</code>, three spawners (the joint state broadcaster and one trajectory controller per arm), <code>move_group</code> and RViz.</p>
+<p class="env docker"><span class="where host">host</span> T2:</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p><span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>source /workspace/code/b5-dual/install/setup.bash
+ros2 launch b5_dual dual.launch.py</code></pre>
+<p class="env local">(Local install: use the path of your clone instead of <code>/workspace</code>.)</p>
+<p>Wait for <code>You can start planning now!</code>. The same harmless messages as in B4 appear (the real-time scheduling warning, <code>No 3D sensor plugin(s)</code>, <code>Overrun detected</code>). If RViz does not open, see the note in B4 step 2; add <code>launch_rviz:=false</code> and everything else still works.</p>
+<p>Open <strong>T3</strong> (a new terminal, a container) and look:</p>
+<p><span class="where box">container</span> T3:</p>
+<pre class="cmd"><code>ros2 control list_controllers
+ros2 param get /move_group robot_description_semantic | grep -o 'group name="[a-z_]*"'
+ros2 topic echo /joint_states --once --field name</code></pre>
+<pre class="out">left_joint_trajectory_controller  joint_trajectory_controller/JointTrajectoryController  active
+joint_state_broadcaster           joint_state_broadcaster/JointStateBroadcaster          active
+right_joint_trajectory_controller joint_trajectory_controller/JointTrajectoryController  active
+group name="left_arm"
+group name="right_arm"
+['left_joint_1', 'left_joint_2', 'left_joint_3', 'left_joint_4', 'left_joint_5', 'left_joint_6', 'left_joint_7', 'right_joint_1', 'right_joint_2', 'right_joint_3', 'right_joint_4', 'right_joint_5', 'right_joint_6', 'right_joint_7']</pre>
+<p>Three controllers, two planning groups, and one <code>/joint_states</code> with the fourteen joints of both arms. (The order of the controller lines can differ. The <code>topic echo</code> may also print <code>A message was lost!!!</code> before the list: it is harmless.)</p>
+<p>In RViz you should see two arms standing 1 m apart (with all joints at zero, as in B1, each points straight up), and in the <em>MotionPlanning</em> panel (tab <em>Planning</em>) the <em>Planning Group</em> box should offer <code>left_arm</code> and <code>right_arm</code>.</p>
+<div class="callout"><strong class="t">No screenshot of the two arms</strong>
+<p>I did not take a picture of this RViz window: another window was in front of it when I tried, and I could not bring it forward from my test setup. What it shows is described above and from the data, not from a screenshot.</p></div>
+</li>
+
+<li>
+<h3>Move each arm, in the shared frame</h3>
+<p><code>move_arm</code> is the <code>move_pose</code> of B4 with two changes: the first argument says which arm (<code>left</code> or <code>right</code>), and the pose is in <code>world</code>. The program builds the group name (<code>left_arm</code>) and the hand link (<code>left_end_effector_link</code>) from that word.</p>
+<div class="lang py">
+<pre class="src" data-file="code/b5-dual/py/move_arm.py"><code>#!/usr/bin/env python3
+"""Ask MoveIt to move one arm's hand to a pose: move_arm left|right X Y Z ROLL PITCH YAW  (metres, degrees).
+
+The pose is in the frame "world", shared by both arms."""
+import math
+import sys
+
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from geometry_msgs.msg import Pose
+from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import (BoundingVolume, Constraints, MoveItErrorCodes,
+                             OrientationConstraint, PositionConstraint)
+from shape_msgs.msg import SolidPrimitive
+
+WORLD = "world"
+
+
+def quaternion_from_rpy(roll, pitch, yaw):
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (sr * cp * cy - cr * sp * sy,   # x
+            cr * sp * cy + sr * cp * sy,   # y
+            cr * cp * sy - sr * sp * cy,   # z
+            cr * cp * cy + sr * sp * sy)   # w
+
+
+def error_name(code):
+    for name in dir(MoveItErrorCodes):
+        if name.isupper() and getattr(MoveItErrorCodes, name) == code:
+            return name
+    return str(code)
+
+
+def main():
+    if len(sys.argv) != 8 or sys.argv[1] not in ("left", "right"):
+        sys.exit("usage: move_arm left|right X Y Z ROLL PITCH YAW   (metres, degrees, frame world)")
+    side = sys.argv[1]
+    group, tip = f"{side}_arm", f"{side}_end_effector_link"   # names from the SRDF and the URDF
+    x, y, z = map(float, sys.argv[2:5])
+    roll, pitch, yaw = (math.radians(float(a)) for a in sys.argv[5:8])
+
+    rclpy.init()
+    node = Node("move_arm")
+    client = ActionClient(node, MoveGroup, "move_action")
+    if not client.wait_for_server(timeout_sec=10.0):
+        sys.exit("no /move_action: is move_group running?")
+
+    target = Pose()
+    target.position.x, target.position.y, target.position.z = x, y, z
+    qx, qy, qz, qw = quaternion_from_rpy(roll, pitch, yaw)
+    target.orientation.x, target.orientation.y = qx, qy
+    target.orientation.z, target.orientation.w = qz, qw
+
+    # position: the hand origin must lie inside a 1 mm sphere around the target
+    sphere = SolidPrimitive(type=SolidPrimitive.SPHERE, dimensions=[0.001])
+    position = PositionConstraint()
+    position.header.frame_id = WORLD
+    position.link_name = tip
+    position.constraint_region = BoundingVolume(primitives=[sphere], primitive_poses=[target])
+    position.weight = 1.0
+    # orientation: each axis within 0.01 rad of the target
+    orientation = OrientationConstraint()
+    orientation.header.frame_id = WORLD
+    orientation.link_name = tip
+    orientation.orientation = target.orientation
+    orientation.absolute_x_axis_tolerance = 0.01
+    orientation.absolute_y_axis_tolerance = 0.01
+    orientation.absolute_z_axis_tolerance = 0.01
+    orientation.weight = 1.0
+
+    goal = MoveGroup.Goal()
+    goal.request.group_name = group
+    goal.request.num_planning_attempts = 5
+    goal.request.allowed_planning_time = 5.0
+    goal.request.max_velocity_scaling_factor = 0.3
+    goal.request.max_acceleration_scaling_factor = 0.3
+    goal.request.goal_constraints = [Constraints(position_constraints=[position],
+                                                 orientation_constraints=[orientation])]
+    goal.planning_options.plan_only = False   # plan AND execute
+
+    send = client.send_goal_async(goal)
+    rclpy.spin_until_future_complete(node, send)
+    handle = send.result()
+    if not handle.accepted:
+        sys.exit("goal rejected")
+    done = handle.get_result_async()
+    rclpy.spin_until_future_complete(node, done)
+    result = done.result().result
+    print(f"result: {error_name(result.error_code.val)}")
+    points = result.planned_trajectory.joint_trajectory.points
+    if points:
+        last = points[-1]
+        print(f"trajectory: {len(points)} points, {last.time_from_start.sec + last.time_from_start.nanosec * 1e-9:.2f} s")
+    node.destroy_node()
+    rclpy.shutdown()
+    sys.exit(0 if result.error_code.val == MoveItErrorCodes.SUCCESS else 1)
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+</div>
+<div class="lang cpp">
+<pre class="src" data-file="code/b5-dual/cpp/move_arm.cpp"><code>// Ask MoveIt to move one arm's hand to a pose: move_arm left|right X Y Z ROLL PITCH YAW  (metres, degrees)
+// The pose is in the frame "world", shared by both arms.
+#include &lt;cmath&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;cstring&gt;
+#include &lt;string&gt;
+#include &lt;memory&gt;
+#include &lt;thread&gt;
+
+#include &lt;geometry_msgs/msg/pose.hpp&gt;
+#include &lt;moveit/move_group_interface/move_group_interface.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;tf2/LinearMath/Quaternion.h&gt;
+
+int main(int argc, char** argv)
+{
+  rclcpp::init(argc, argv);
+  if (argc != 8 || (std::strcmp(argv[1], "left") != 0 &amp;&amp; std::strcmp(argv[1], "right") != 0)) {
+    std::fprintf(stderr, "usage: move_arm left|right X Y Z ROLL PITCH YAW   (metres, degrees, frame world)\n");
+    return 2;
+  }
+  const std::string side = argv[1];
+  const std::string group_name = side + "_arm";            // names from the SRDF and the URDF
+  const std::string tip = side + "_end_effector_link";
+  const double x = std::atof(argv[2]), y = std::atof(argv[3]), z = std::atof(argv[4]);
+  const double deg = M_PI / 180.0;
+  tf2::Quaternion q;
+  q.setRPY(std::atof(argv[5]) * deg, std::atof(argv[6]) * deg, std::atof(argv[7]) * deg);
+
+  auto node = std::make_shared&lt;rclcpp::Node&gt;("move_arm");
+  // MoveGroupInterface needs the node to be spinning, so spin it in a thread
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread spinner([&amp;executor]() { executor.spin(); });
+
+  moveit::planning_interface::MoveGroupInterface group(node, group_name);
+  group.setEndEffectorLink(tip);
+  group.setPoseReferenceFrame("world");
+  group.setNumPlanningAttempts(5);
+  group.setPlanningTime(5.0);
+  group.setMaxVelocityScalingFactor(0.3);
+  group.setMaxAccelerationScalingFactor(0.3);
+
+  geometry_msgs::msg::Pose target;
+  target.position.x = x;
+  target.position.y = y;
+  target.position.z = z;
+  target.orientation.x = q.x();
+  target.orientation.y = q.y();
+  target.orientation.z = q.z();
+  target.orientation.w = q.w();
+  group.setPoseTarget(target);
+
+  moveit::planning_interface::MoveGroupInterface::Plan plan;
+  const auto planned = group.plan(plan);
+  int status = 1;
+  if (planned == moveit::core::MoveItErrorCode::SUCCESS) {
+    const auto&amp; pts = plan.trajectory.joint_trajectory.points;
+    const auto&amp; last = pts.back().time_from_start;
+    const auto executed = group.execute(plan);
+    std::printf("result: %s\n", executed == moveit::core::MoveItErrorCode::SUCCESS ? "SUCCESS" : "EXECUTION FAILED");
+    std::printf("trajectory: %zu points, %.2f s\n", pts.size(), last.sec + last.nanosec * 1e-9);
+    status = executed == moveit::core::MoveItErrorCode::SUCCESS ? 0 : 1;
+  } else {
+    std::printf("result: PLANNING FAILED (error code %d)\n", planned.val);
+  }
+  executor.cancel();
+  spinner.join();
+  rclcpp::shutdown();
+  return status;
+}</code></pre>
+</div>
+<p>The poses below were made as in B2: forward kinematics of the Gen3 for some joint values (here the joint values 0.3, 0.5, −0.4, 2.0, 0.5, −0.7, 0.9, which reach toward the middle between the two arms), converted into the <code>world</code> frame. The right arm is turned by 180°, so its hand has the "same" pose with the yaw turned by 180° and the x position mirrored. <strong>Lm</strong> is a pose for the left hand and <strong>Rm</strong> its mirror image for the right hand: the two hands end up about 10 cm apart in the middle. Move the right arm there first, with the left arm still at rest. <span class="where box">container</span> T3:</p>
+<div class="lang py"><pre class="cmd"><code>cd /workspace/code/b5-dual
+source install/setup.bash
+ros2 run b5_dual move_arm.py right -0.034 -0.040 0.380 -102.128 30.234 107.772</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>cd /workspace/code/b5-dual
+source install/setup.bash
+ros2 run b5_dual move_arm right -0.034 -0.040 0.380 -102.128 30.234 107.772</code></pre></div>
+<pre class="out">result: SUCCESS
+trajectory: 88 points, 8.69 s</pre>
+<p>Check with the frames, as in B2 and B4. The hand of the right arm in the <code>world</code> frame:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo world right_end_effector_link</code></pre>
+<pre class="out">- Translation: [-0.034, -0.040, 0.381]</pre>
+<p>(Ctrl+C to stop it; the first line of its output is the one shown, and a rotation line follows.) The hand is where you asked for it, within a millimetre, and one frame, <code>world</code>, serves both arms. (The point counts and times differ from run to run; the planner is random.)</p>
+</li>
+
+<li>
+<h3>The other arm is in the way</h3>
+<p>Now the test of the shared scene. First take the right arm away to a pose far from the middle, then put the left hand into the middle, and then ask the right arm for the pose it had before:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b5_dual move_arm.py right -0.174 0.030 0.649 -60.494 18.394 115.997
+ros2 run b5_dual move_arm.py left 0.034 0.040 0.380 -102.128 30.234 -72.228
+ros2 run b5_dual move_arm.py right -0.034 -0.040 0.380 -102.128 30.234 107.772</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b5_dual move_arm right -0.174 0.030 0.649 -60.494 18.394 115.997
+ros2 run b5_dual move_arm left 0.034 0.040 0.380 -102.128 30.234 -72.228
+ros2 run b5_dual move_arm right -0.034 -0.040 0.380 -102.128 30.234 107.772</code></pre></div>
+<pre class="out">result: SUCCESS
+trajectory: 22 points, 2.08 s
+result: SUCCESS
+trajectory: 88 points, 8.67 s
+result: FAILURE</pre>
+<div class="lang cpp"><p>In C++ the last result reads <code>PLANNING FAILED (error code 99999)</code>, after an <code>[ERROR] ... MoveGroupInterface::plan() failed or timeout reached</code> line, as in the exercise of B4.</p></div>
+<p>The first two moves work. The third is <strong>the same request that worked a minute ago</strong>, and now it fails after about five seconds. Nothing in the request changed: the left hand is now in the middle, about 10 cm from the place where the right hand should go. MoveIt checks the goal pose against the whole robot, and the left arm is part of it, so the goal is in collision. As in B4, the reason is in T2, the terminal of <code>move_group</code>: <code>Unable to sample any valid states for goal tree</code>.</p>
+<p>The same goal works whenever the left arm is not in the way (that was step 5), so this is the other arm and not an unreachable pose. Nothing was added to the scene by hand: the arm was in the scene from the start.</p>
+</li>
+
+<li>
+<h3>When it says <code>START_STATE_INVALID</code></h3>
+<p>With the planner you will sometimes meet this, in these or other moves:</p>
+<pre class="out">result: START_STATE_INVALID</pre>
+<p>It means MoveIt refuses to plan <em>from where the arm is now</em>, and it will keep refusing every request for that arm until you fix the state. In T2 it says:</p>
+<pre class="out">[ERROR] [move_group]: PlanningRequestAdapter 'CheckStartStateBounds' failed, because 'Start state out of bounds.'. Aborting planning pipeline.</pre>
+<p>What I found: some joints (1, 3, 5 and 7) are <em>continuous</em>, they can turn without end (B1). MoveIt's random search sometimes ends a path with such a joint turned past half a turn: for example <code>right_joint_5</code> at 3.35 rad, when half a turn is π = 3.14 rad. The fake arm accepts that, MoveIt then calls the state "out of bounds". The pose of the hand is fine: 3.35 rad is the same angle as 3.35 − 2π = −2.93 rad. I did not find a setting that prevents it. In my runs it happened from time to time, and more often after long paths (80 or more points for a short move), but long paths alone did not always cause it.</p>
+<p>To recover, put the joint back inside ±π with a trajectory sent straight to the controller (A7), in the <em>equivalent</em> angle. First read the joints, with T3:</p>
+<pre class="cmd"><code>ros2 topic echo /joint_states --once --field position</code></pre>
+<p>Find the joint that is beyond ±π (the order is the order of the names above: left arm first). Then send the whole arm to the same pose with that one joint moved by 2π, for example for <code>right_joint_5</code> at 3.35 and all the other joints at 0:</p>
+<pre class="cmd"><code>ros2 action send_goal /right_joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [right_joint_1, right_joint_2, right_joint_3, right_joint_4, right_joint_5, right_joint_6, right_joint_7], points: [{positions: [0, 0, 0, 0, -2.9332, 0, 0], time_from_start: {sec: 3}}]}}"</code></pre>
+<p>Replace the seven numbers by the values you read, with the joint beyond π replaced by its value minus 2π (or plus 2π if it is below −π). I tried this on the fake arm with a test state: <code>right_joint_5</code> at 3.35 gave <code>START_STATE_INVALID</code> for every plan; at 3.14 planning worked; and after sending −2.9332 (the equivalent angle) planning worked again. The same joints exist in a single arm, so it may occur there too (I did not see it in B4). If nothing else helps, stop the launch in T2 and start it again: the arms return to their zero pose.</p>
+<p>Two other results you may meet, because the planner is random: <code>INVALID_MOTION_PLAN</code> (a plan was found, but it failed the final check, and the arm did not move) and a plain <code>FAILURE</code> for a pose that is reachable. In both cases ask again.</p>
+</li>
+
+</ol>
+
+<h2>4. Check</h2>
+<ul>
+<li>T2 printed <code>You can start planning now!</code>, three controllers are <code>active</code>, and <code>/joint_states</code> lists fourteen joints with the prefixes.</li>
+<li>The right arm reached Rm, and <code>tf2_echo world right_end_effector_link</code> agrees.</li>
+<li>With the left hand in the middle, the same goal for the right arm printed a failure instead of <code>SUCCESS</code>.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Swap the roles. Reset the arms (stop and restart T2, or move them back), move the <strong>right</strong> arm to Rm first, and then ask the <strong>left</strong> arm for Lm. What happens, and why?</p>
+<details>
+<summary>Answer</summary>
+<div class="lang py"><pre class="cmd"><code>ros2 run b5_dual move_arm.py right -0.034 -0.040 0.380 -102.128 30.234 107.772
+ros2 run b5_dual move_arm.py left 0.034 0.040 0.380 -102.128 30.234 -72.228</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b5_dual move_arm right -0.034 -0.040 0.380 -102.128 30.234 107.772
+ros2 run b5_dual move_arm left 0.034 0.040 0.380 -102.128 30.234 -72.228</code></pre></div>
+<pre class="out">result: SUCCESS
+trajectory: 89 points, 8.70 s
+result: FAILURE</pre>
+<div class="lang cpp"><p>In C++ the last line reads <code>result: PLANNING FAILED (error code 99999)</code>, after the <code>[ERROR] ... plan() failed or timeout reached</code> line.</p></div>
+<p>The right arm gets to Rm, and then the left arm's goal is refused, for the mirror reason of step 6: the right hand is about 10 cm from where the left hand should go, and the right arm is part of the scene. Nothing about the two arms is special: whichever arm moves second sees the first arm as an obstacle.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>Two arms in one robot: use the arm macro twice with a <strong>prefix</strong> (<code>left_</code>, <code>right_</code>) and a base position. Every joint, link and hardware name gets the prefix.</li>
+<li>Files that list names need both arms: the <code>ros2_control</code> controllers, the SRDF (two planning groups), the kinematics, joint limits, OMPL and MoveIt controller files. Here a script made them from the single-arm files.</li>
+<li>One <code>controller_manager</code> with a trajectory controller per arm, one <code>/joint_states</code> with all 14 joints, poses in the shared frame <code>world</code>.</li>
+<li>The <strong>shared scene</strong> comes for free: each arm is an obstacle for the other, at its current joint values. A goal that touches the other arm fails.</li>
+<li><code>START_STATE_INVALID</code> with "Start state out of bounds" can come from a continuous joint turned past ±π; send the same pose with that joint's equivalent angle (± 2π) straight to the controller.</li>
+<li>Not tested: a real pair of arms (two <code>robot_ip</code>s), the grippers, planning both arms in one request, and namespaces with two controller managers.</li>
+</ul>
+
+<nav class="pager">
+<a href="b4-moveit.html"><small>Previous</small>B4 · MoveIt 2</a>
+<span class="soon next"><small>Next</small>C1 · Gazebo basics (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
