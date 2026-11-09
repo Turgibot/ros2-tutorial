@@ -41,7 +41,7 @@
 <p>It is a Gazebo system plugin (as in C1) that lives inside the simulator. It starts a <code>controller_manager</code> there, and gives it the simulated joints as a hardware component: when a controller writes a joint command, the plugin applies it to the Gazebo joint, and when a controller reads the joint state, the plugin gets it from Gazebo. The controllers do not know the difference. In the arm's description, one <code>xacro:if</code> picks the plugin: <code>sim_gazebo:=true</code> gives <code>gz_ros2_control/GazeboSimSystem</code>, <code>use_fake_hardware:=true</code> gives <code>mock_components/GenericSystem</code>.</p>
 
 <h3>The launch file</h3>
-<p>Kinova ships <code>kortex_sim_control.launch.py</code>, but it always opens the Gazebo window (so it cannot run on a machine without a display) and always loads <code>empty.sdf</code>. This course uses a copy, <code>code/c2-sim/launch/sim.launch.py</code>, with a few more arguments: <code>gui</code> (window or not), <code>world</code> (which world file), <code>gripper</code> (Robotiq 2F-85 by default: upstream the default is no gripper, and then the gripper controller fails to start), and the spawn position <code>x y z</code>. Everything else is as upstream: the same description, the same controller file, the same controller names.</p>
+<p>Kinova ships <code>kortex_sim_control.launch.py</code>, but it always opens the Gazebo window (so it cannot run on a machine without a display) and always loads <code>empty.sdf</code>. This course uses a copy, <code>code/c2-sim/launch/sim.launch.py</code>, with a few more arguments: <code>gui</code> (window or not), <code>world</code> (which world file), <code>gripper</code> (Robotiq 2F-85 by default: upstream the default is no gripper, and then the gripper controller fails to start), and the spawn position <code>x y z</code>. It also asks for the camera renderer <code>ogre2</code> (upstream: <code>ogre</code>), and, without a window, starts Gazebo with <code>--headless-rendering</code>; both matter for the cameras of C3 and C4, and are not needed in this lesson. There are two more arguments, <code>vision</code> and <code>sensors_in_world</code>, which C4 explains. Everything else is as upstream: the same description, the same controller file, the same controller names.</p>
 
 <h3>Simulated time again</h3>
 <p>Everything in the simulation uses the <code>/clock</code> of C1: the launch file bridges it, and the nodes run with <code>use_sim_time</code>. When Gazebo is paused, the controllers do not run, because their clock does not move.</p>
@@ -71,6 +71,7 @@ robotiq_2f_85, `x y z` set where the arm is spawned, and RViz is off by default.
 description and the controller names are the same as in the upstream launch file, so a program written for this
 one also works with the fake hardware and (in principle) with the real arm."""
 import os
+import re
 
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
@@ -95,12 +96,19 @@ def launch_setup(context, *args, **kwargs):
     robot_description_content = Command([
         PathJoinSubstitution([FindExecutable(name="xacro")]), " ",
         PathJoinSubstitution([FindPackageShare("kortex_description"), "robots", "kinova.urdf.xacro"]), " ",
-        "robot_ip:=xxx.yyy.zzz.www name:=gen3 arm:=gen3 dof:=7 vision:=false prefix:=\"\" sim_gazebo:=true ",
+        "robot_ip:=xxx.yyy.zzz.www name:=gen3 arm:=gen3 dof:=7 prefix:=\"\" sim_gazebo:=true ",
+        "vision:=", LaunchConfiguration("vision"), " ",
+        "gazebo_renderer:=ogre2 ",
         "simulation_controllers:=", controllers, " gripper:=", gripper])
     robot_description = robot_description_content.perform(context)
+    if LaunchConfiguration("sensors_in_world").perform(context) == "true":
+        # Gazebo may have only one Sensors system (the camera renderer). The robot description adds one, and so
+        # does a world that has cameras of its own: two of them crash the simulator. Remove the robot's.
+        robot_description = re.sub(r'&lt;plugin filename="gz-sim-sensors-system".*?&lt;/plugin&gt;', "", robot_description,
+                                   flags=re.S)
 
-    # Gazebo: -r runs at once, -s is the server only (no window)
-    gz_args = "-r -v 3 " + ("" if gui == "true" else "-s ") + world + \
+    # Gazebo: -r runs at once, -s is the server only (no window; --headless-rendering lets cameras render without a display)
+    gz_args = "-r -v 3 " + ("" if gui == "true" else "-s --headless-rendering ") + world + \
         " --physics-engine gz-physics-bullet-featherstone-plugin"
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([FindPackageShare("ros_gz_sim"), "/launch/gz_sim.launch.py"]),
@@ -145,6 +153,9 @@ def generate_launch_description():
         DeclareLaunchArgument("x", default_value="0.0"),
         DeclareLaunchArgument("y", default_value="0.0"),
         DeclareLaunchArgument("z", default_value="0.0"),
+        DeclareLaunchArgument("vision", default_value="false", description="true: add the wrist camera (a Realsense) to the arm"),
+        DeclareLaunchArgument("sensors_in_world", default_value="false",
+                              description="true if the world file already has the Sensors system (the C3 lab does)"),
         DeclareLaunchArgument("launch_rviz", default_value="false"),
     ]
     return LaunchDescription(args + [OpaqueFunction(function=launch_setup)])</code></pre>
@@ -312,7 +323,7 @@ ros2 topic echo /joint_states --once --field position</code></pre>
 
 <nav class="pager">
 <a href="c1-gazebo-basics.html"><small>Previous</small>C1 · Gazebo basics</a>
-<a class="next" href="c3-table-and-blocks.html"><small>Next</small>C3 · A table and lettered blocks</a>
+<span class="soon next"><small>Next</small>C3 · Table and blocks (coming soon)</span>
 </nav>
 </main>
 <footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>

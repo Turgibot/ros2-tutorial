@@ -50,22 +50,22 @@
 
     <include>
       <uri>model://block_A</uri>
-      <pose>0.60 -0.18 0.325 0 0 0</pose>
+      <pose>0.50 -0.18 0.325 0 0 0</pose>
     </include>
 
     <include>
       <uri>model://block_B</uri>
-      <pose>0.60 -0.06 0.325 0 0 0</pose>
+      <pose>0.50 -0.06 0.325 0 0 0</pose>
     </include>
 
     <include>
       <uri>model://block_C</uri>
-      <pose>0.60 0.06 0.325 0 0 0</pose>
+      <pose>0.50 0.06 0.325 0 0 0</pose>
     </include>
 
     <include>
       <uri>model://block_D</uri>
-      <pose>0.60 0.18 0.325 0 0 0</pose>
+      <pose>0.50 0.18 0.325 0 0 0</pose>
     </include>
 
     <!-- a camera 1.2 m above the table, looking straight down -->

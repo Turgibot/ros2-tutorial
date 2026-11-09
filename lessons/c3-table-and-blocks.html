@@ -162,22 +162,22 @@ source install/setup.bash</code></pre>
 
     &lt;include&gt;
       &lt;uri&gt;model://block_A&lt;/uri&gt;
-      &lt;pose&gt;0.60 -0.18 0.325 0 0 0&lt;/pose&gt;
+      &lt;pose&gt;0.50 -0.18 0.325 0 0 0&lt;/pose&gt;
     &lt;/include&gt;
 
     &lt;include&gt;
       &lt;uri&gt;model://block_B&lt;/uri&gt;
-      &lt;pose&gt;0.60 -0.06 0.325 0 0 0&lt;/pose&gt;
+      &lt;pose&gt;0.50 -0.06 0.325 0 0 0&lt;/pose&gt;
     &lt;/include&gt;
 
     &lt;include&gt;
       &lt;uri&gt;model://block_C&lt;/uri&gt;
-      &lt;pose&gt;0.60 0.06 0.325 0 0 0&lt;/pose&gt;
+      &lt;pose&gt;0.50 0.06 0.325 0 0 0&lt;/pose&gt;
     &lt;/include&gt;
 
     &lt;include&gt;
       &lt;uri&gt;model://block_D&lt;/uri&gt;
-      &lt;pose&gt;0.60 0.18 0.325 0 0 0&lt;/pose&gt;
+      &lt;pose&gt;0.50 0.18 0.325 0 0 0&lt;/pose&gt;
     &lt;/include&gt;
 
     &lt;!-- a camera 1.2 m above the table, looking straight down --&gt;
@@ -219,7 +219,7 @@ source install/setup.bash</code></pre>
 <ul>
 <li>It is the world of C1 with two more systems: <code>Sensors</code> (for the cameras), and a scene with a light background.</li>
 <li>The <strong>table</strong> is a static box 0.6 m (x) by 0.9 m (y) by 0.3 m, centred at x = 0.65 m. Its top is at z = 0.30 m, and it spans x from 0.35 m to 0.95 m. The arm will stand at the origin, facing +x, so the table is in front of it.</li>
-<li>The four <strong>blocks</strong> are <code>include</code>d at x = 0.60 m, y = −0.18, −0.06, 0.06 and 0.18 m (12 cm apart: the open gripper is 8.5 cm wide, so there is room for its fingers). Their centre is at z = 0.325 m: the top of the table plus half a block (0.30 + 0.025).</li>
+<li>The four <strong>blocks</strong> are <code>include</code>d at x = 0.50 m, y = −0.18, −0.06, 0.06 and 0.18 m (12 cm apart: the open gripper is 8.5 cm wide, so there is room for its fingers). Their centre is at z = 0.325 m: the top of the table plus half a block (0.30 + 0.025).</li>
 <li>The two <strong>cameras</strong> are static models with a <code>sensor</code>. The overhead one is 1.0 m above the table looking down, the side one looks at the blocks from the arm's side.</li>
 </ul>
 </li>
@@ -375,8 +375,8 @@ int main(int argc, char **argv) {
 <p><span class="where box">container</span> T2:</p>
 <div class="lang py"><pre class="cmd"><code>ros2 run c3_world check_settled.py</code></pre></div>
 <div class="lang cpp"><pre class="cmd"><code>ros2 run c3_world check_settled</code></pre></div>
-<pre class="out">[INFO] [...] [check_settled]: t =   8.2 s   A: 0.6000 -0.1800 0.3250   B: 0.6000 -0.0600 0.3250   C: 0.6000 0.0600 0.3250   D: 0.6000 0.1800 0.3250
-[INFO] [...] [check_settled]: t =   9.2 s   A: 0.6000 -0.1800 0.3250   B: 0.6000 -0.0600 0.3250   C: 0.6000 0.0600 0.3250   D: 0.6000 0.1800 0.3250
+<pre class="out">[INFO] [...] [check_settled]: t =   8.2 s   A: 0.5000 -0.1800 0.3250   B: 0.5000 -0.0600 0.3250   C: 0.5000 0.0600 0.3250   D: 0.5000 0.1800 0.3250
+[INFO] [...] [check_settled]: t =   9.2 s   A: 0.5000 -0.1800 0.3250   B: 0.5000 -0.0600 0.3250   C: 0.5000 0.0600 0.3250   D: 0.5000 0.1800 0.3250
 ...</pre>
 <p>The first time (8.2 s here) depends on how long you waited. The positions are those of the world file, z = 0.3250 to four decimals, and they do not change from line to line: the blocks rest on the table. (A closer look at one pose, with <code>ros2 topic echo /model/block_A/pose --once</code>, shows z = 0.32499942: the block sinks 0.6 micrometres into the table, the solver's contact tolerance. Orientations are identity.) The header of the pose has <code>frame_id: lab</code>, the name of the world, which is the frame these coordinates are in. Press Ctrl+C.</p>
 </li>
@@ -384,7 +384,7 @@ int main(int argc, char **argv) {
 <li>
 <h3>Add a block while it runs, and make a tower</h3>
 <p>A model can also be created in a running world. <code>ros_gz_sim create</code> reads a model file and adds it under a new name. Drop a second block on top of A. Its centre will rest 5 cm above A's centre, at 0.325 + 0.05 = 0.375 m, so start it 4.5 cm higher, at z = 0.42 m. <span class="where box">container</span> T2:</p>
-<pre class="cmd"><code>ros2 run ros_gz_sim create -file $(ros2 pkg prefix c3_world)/share/c3_world/models/block_A/model.sdf -name extra -x 0.6 -y -0.18 -z 0.42
+<pre class="cmd"><code>ros2 run ros_gz_sim create -file $(ros2 pkg prefix c3_world)/share/c3_world/models/block_A/model.sdf -name extra -x 0.5 -y -0.18 -z 0.42
 sleep 3
 gz model -m extra -p</code></pre>
 <pre class="out">[INFO] [...] [ros_gz_sim]: Entity creation successful.
@@ -394,8 +394,8 @@ Requesting state for world [lab]...
 Model: [...]
   - Name: extra
   - Pose [ XYZ (m) ] [ RPY (rad) ]:
-    [0.600000 -0.180000 0.375000]
-    [0.000000 0.000000 0.000000]</pre>
+    [0.500000 -0.180000 0.375000]
+    [-0.000000 0.000000 -0.000000]</pre>
 <p>It fell 4.5 cm, landed on A, and stays at z = 0.375000, with orientation zero: the stack is stable. (The test run read the same pose 1 s, 4 s and 10 s after the spawn: no change.) The side camera, again:</p>
 <figure><img src="img/c3-tower.png" alt="two red blocks with the letter A stacked on the table, three other blocks beside them" width="640" height="480">
 <figcaption>The side camera after the spawn: a tower of two A blocks. The new block is a copy of A, so it also says A.</figcaption></figure>
@@ -433,7 +433,7 @@ Available models:
 <details>
 <summary>Answer</summary>
 <p>Each block adds its height, 5 cm: the centres are at 0.325, 0.375 and 0.425 m. Run the spawn of step 7 twice with the names <code>extra</code> and <code>extra2</code>, the second at <code>-z 0.47</code> (4.5 cm above its resting height) after the first has landed. It was run: <code>extra</code> rested at 0.375000 and <code>extra2</code> at <code>0.425000</code>, still there 6 s later, with the lower block unmoved.</p>
-<pre class="cmd"><code>ros2 run ros_gz_sim create -file $(ros2 pkg prefix c3_world)/share/c3_world/models/block_A/model.sdf -name extra2 -x 0.6 -y -0.18 -z 0.47
+<pre class="cmd"><code>ros2 run ros_gz_sim create -file $(ros2 pkg prefix c3_world)/share/c3_world/models/block_A/model.sdf -name extra2 -x 0.5 -y -0.18 -z 0.47
 sleep 3
 gz model -m extra2 -p</code></pre>
 </details>

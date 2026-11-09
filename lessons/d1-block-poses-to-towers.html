@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D1 · Block poses to towers</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part D · From symbols to motion</span></header>
+<main>
+
+<h1>D1 · Block poses to towers</h1>
+<p class="lead">From numbers to a sentence: a node that watches the blocks and says "B is on A, C is on D".</p>
+
+<h2>1. Goal</h2>
+<p>The simulator tells us where every block is: a position of three numbers. A planner, or a person, does not think in numbers: it thinks "A is on the table, C is on D". The step from numbers to such statements is the job of a <strong>world estimator</strong>, and its answer is the <strong>symbolic state</strong> of the world. At the end of this lesson you will have:</p>
+<ul>
+<li>written the rule "X is on Y" as a test on two positions,</li>
+<li>built towers from these relations, in Python and in C++,</li>
+<li>published the result as a message on <code>/towers</code>, so any other node can use it,</li>
+<li>moved blocks in Gazebo and watched the sentence change.</li>
+</ul>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>Run in the course container, Gazebo headless, with the lab of C3 (no arm). Blocks were moved with the <code>set_pose</code> service of Gazebo, not by the arm (that comes in D2). The <code>held</code> case of the program (a block in the air) was seen only on a block that was falling, because nothing was holding one.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>Geometric state and symbolic state</h3>
+<p>The poses of C4 are the <em>geometric</em> state: four blocks, each with x, y, z. The <em>symbolic</em> state keeps only what matters to a plan: which block is on which. Two geometric states that differ by a centimetre are the same symbolic state. The symbolic state is small, easy to compare and to print, and a planner can reason with it. Part D uses it for the goals ("C on A") and Part E for recognising what a person is building.</p>
+
+<h3>The rule "X is on Y"</h3>
+<p>Blocks are cubes of side <code>s = 0.05</code> m. If X rests on Y, then X is directly above Y, and the distance between their centres is one block height. Three tests, with tolerances to absorb small errors (a block placed by a gripper is never exactly in line):</p>
+<pre class="math">dx = x_X − x_Y,   dy = y_X − y_Y,   dz = z_X − z_Y
+
+X is on Y   when   |dx| &lt; 0.03   and   |dy| &lt; 0.03   and   |dz − 0.05| &lt; 0.01</pre>
+<p>The tolerance in x and y is 3 cm, a bit more than half a block (2.5 cm): a block shifted by more than that would not rest on the other one. The tolerance in z is 1 cm. In C3 a resting block was at z = 0.325 to a micrometre, and the camera method of C4 was wrong by up to 5 mm; both fit in 1 cm.</p>
+<p>A block that is on no other block is <strong>on the table</strong> if its height is the table's top plus half a block: <code>|z − (0.30 + 0.025)| &lt; 0.01</code>. If it is neither on a block nor on the table, it is in the air: carried by a gripper, or falling. The program calls that <code>held</code>.</p>
+
+<h3>From relations to towers</h3>
+<p>A <strong>tower</strong> is a block on the table together with everything stacked on it. The program finds every block on the table, then follows the "is on" relation upwards: the block that is on it, the block that is on that one, and so on. A tower is written bottom to top: <code>DCA</code> is D on the table, C on D, A on C. Towers are separated by <code>|</code>, and sorted by their bottom block:</p>
+<pre class="math">A | B | C | D        four blocks on the table
+A | B | DC            C is on D
+BA | DC                A is on B, C is on D</pre>
+
+<h3>Publish a state, not a stream</h3>
+<p>The poses arrive 20 times a second per block, but the symbolic state changes only when a block is moved. The program publishes <code>/towers</code> <em>only when the sentence changes</em>, as a <code>std_msgs/String</code>. That raises one problem: a node that starts later would never receive the last message, and would know nothing until the next change. The fix is the quality of service <strong>transient local</strong>: the publisher keeps the last message, and gives it to every new subscriber. The program uses it (depth 1: only the last message matters).</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span> The lab of C3 needs <code>c2-sim</code> and <code>c3-world</code> built (as in C3 and C4); then:</p>
+<pre class="cmd"><code>cd code/d1-towers
+colcon build
+cd ../..
+for p in c2-sim c3-world d1-towers; do source code/$p/install/setup.bash; done</code></pre>
+<p>Run the <code>for</code> line in every terminal of this lesson.</p>
+</li>
+
+<li>
+<h3>The estimator</h3>
+<div class="lang py"><pre class="src" data-file="code/d1-towers/py/towers.py"><code>#!/usr/bin/env python3
+"""The world estimator: turn the block poses into towers.
+
+Reads /model/block_X/pose (ground truth from Gazebo) and publishes /towers (std_msgs/String), for example
+"A | B | DC": three towers, A alone, B alone, and C standing on D. A block in the air (held by the gripper)
+is reported on its own as "held: X"."""
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+
+BLOCKS = "ABCD"
+SIZE = 0.05              # a block is a 5 cm cube
+TABLE_Z = 0.30           # height of the table top
+TOL_XY = 0.03            # "directly above": centres closer than 3 cm in x and in y
+TOL_Z = 0.01             # heights are compared to within 1 cm
+
+
+class Towers(Node):
+    def __init__(self):
+        super().__init__("towers")
+        self.pos = {}
+        self.last = None
+        # "transient local": a program that starts later still receives the last message at once
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.pub = self.create_publisher(String, "/towers", latched)
+        for k in BLOCKS:
+            self.create_subscription(PoseStamped, f"/model/block_{k}/pose",
+                                     lambda msg, k=k: self.on_pose(k, msg), 10)
+
+    def on_pose(self, k, msg):
+        p = msg.pose.position
+        self.pos[k] = (p.x, p.y, p.z)
+        if len(self.pos) &lt; len(BLOCKS):
+            return
+        text = describe(self.pos)
+        if text != self.last:                  # publish only when something changed
+            self.last = text
+            self.pub.publish(String(data=text))
+            self.get_logger().info(text)
+
+
+def below(pos, k):
+    """The block that k stands on, or None (k is on the table, or in the air)."""
+    for j in BLOCKS:
+        if j != k:
+            dx, dy, dz = (pos[k][i] - pos[j][i] for i in range(3))
+            if abs(dx) &lt; TOL_XY and abs(dy) &lt; TOL_XY and abs(dz - SIZE) &lt; TOL_Z:
+                return j
+    return None
+
+
+def on_table(pos, k):
+    return abs(pos[k][2] - (TABLE_Z + SIZE / 2)) &lt; TOL_Z
+
+
+def describe(pos):
+    above = {below(pos, k): k for k in BLOCKS if below(pos, k)}      # who is on top of whom
+    towers, held = [], []
+    for k in BLOCKS:
+        if below(pos, k) is None:
+            if on_table(pos, k):               # the bottom of a tower
+                chain = k
+                while chain[-1] in above:
+                    chain += above[chain[-1]]
+                towers.append(chain)
+            else:
+                held.append(k)
+    text = " | ".join(sorted(towers))
+    if held:
+        text += "   held: " + " ".join(held)
+    return text
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(Towers())
+
+
+if __name__ == "__main__":
+    main()</code></pre></div>
+<div class="lang cpp"><pre class="src" data-file="code/d1-towers/cpp/towers.cpp"><code>// The world estimator: turn the block poses into towers.
+// Reads /model/block_X/pose (ground truth from Gazebo) and publishes /towers (std_msgs/String), for example
+// "A | B | DC": three towers, A alone, B alone, and C standing on D. A block in the air (held by the gripper)
+// is reported on its own as "held: X".
+#include &lt;algorithm&gt;
+#include &lt;array&gt;
+#include &lt;cmath&gt;
+#include &lt;map&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;geometry_msgs/msg/pose_stamped.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;std_msgs/msg/string.hpp&gt;
+
+const std::string BLOCKS = "ABCD";
+const double SIZE = 0.05;      // a block is a 5 cm cube
+const double TABLE_Z = 0.30;   // height of the table top
+const double TOL_XY = 0.03;    // "directly above": centres closer than 3 cm in x and in y
+const double TOL_Z = 0.01;     // heights are compared to within 1 cm
+
+using Pos = std::array&lt;double, 3&gt;;
+
+// The block that k stands on, or 0 (k is on the table, or in the air).
+char below(const std::map&lt;char, Pos&gt; &amp;pos, char k) {
+  for (char j : BLOCKS) {
+    if (j == k) continue;
+    double dx = pos.at(k)[0] - pos.at(j)[0], dy = pos.at(k)[1] - pos.at(j)[1], dz = pos.at(k)[2] - pos.at(j)[2];
+    if (std::fabs(dx) &lt; TOL_XY &amp;&amp; std::fabs(dy) &lt; TOL_XY &amp;&amp; std::fabs(dz - SIZE) &lt; TOL_Z) return j;
+  }
+  return 0;
+}
+
+bool on_table(const std::map&lt;char, Pos&gt; &amp;pos, char k) {
+  return std::fabs(pos.at(k)[2] - (TABLE_Z + SIZE / 2)) &lt; TOL_Z;
+}
+
+std::string describe(const std::map&lt;char, Pos&gt; &amp;pos) {
+  std::map&lt;char, char&gt; above;                      // who is on top of whom
+  for (char k : BLOCKS) if (below(pos, k)) above[below(pos, k)] = k;
+  std::vector&lt;std::string&gt; towers;
+  std::string held;
+  for (char k : BLOCKS) {
+    if (below(pos, k)) continue;
+    if (on_table(pos, k)) {                        // the bottom of a tower
+      std::string chain(1, k);
+      while (above.count(chain.back())) chain += above[chain.back()];
+      towers.push_back(chain);
+    } else {
+      held += std::string(" ") + k;
+    }
+  }
+  std::sort(towers.begin(), towers.end());
+  std::string text;
+  for (size_t i = 0; i &lt; towers.size(); ++i) text += (i ? " | " : "") + towers[i];
+  if (!held.empty()) text += "   held:" + held;
+  return text;
+}
+
+class Towers : public rclcpp::Node {
+public:
+  Towers() : Node("towers") {
+    // "transient local": a program that starts later still receives the last message at once
+    pub_ = create_publisher&lt;std_msgs::msg::String&gt;("/towers", rclcpp::QoS(1).transient_local());
+    for (char k : BLOCKS) {
+      subs_.push_back(create_subscription&lt;geometry_msgs::msg::PoseStamped&gt;(
+          std::string("/model/block_") + k + "/pose", 10,
+          [this, k](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { on_pose(k, *msg); }));
+    }
+  }
+
+private:
+  void on_pose(char k, const geometry_msgs::msg::PoseStamped &amp;msg) {
+    const auto &amp;p = msg.pose.position;
+    pos_[k] = {p.x, p.y, p.z};
+    if (pos_.size() &lt; BLOCKS.size()) return;
+    std::string text = describe(pos_);
+    if (text != last_) {                           // publish only when something changed
+      last_ = text;
+      std_msgs::msg::String out;
+      out.data = text;
+      pub_-&gt;publish(out);
+      RCLCPP_INFO(get_logger(), "%s", text.c_str());
+    }
+  }
+
+  rclcpp::Publisher&lt;std_msgs::msg::String&gt;::SharedPtr pub_;
+  std::vector&lt;rclcpp::Subscription&lt;geometry_msgs::msg::PoseStamped&gt;::SharedPtr&gt; subs_;
+  std::map&lt;char, Pos&gt; pos_;
+  std::string last_;
+};
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;Towers&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre></div>
+<ul>
+<li><code>below(k)</code> is the rule of the Concepts: it looks for a block <code>j</code> that <code>k</code> stands on, or none.</li>
+<li><code>describe</code> builds a map "who is on top of whom", starts a tower at each block that is on the table, and follows the map upwards.</li>
+<li>The node subscribes to the four pose topics of C3, keeps the latest position of each, and every time a pose arrives, recomputes the sentence. It publishes and logs it only if it is different from the last one.</li>
+</ul>
+</li>
+
+<li>
+<h3>Start the lab and the estimator</h3>
+<p><span class="where box">container</span> T1: the lab, headless (no arm is needed in this lesson):</p>
+<pre class="cmd"><code>ros2 launch c3_world lab.launch.py</code></pre>
+<p>Open a second terminal (<strong>T2</strong>: <code>docker/run_ros2.sh</code> in the <code>ros2-tutorial</code> folder, then the <code>for</code> line) and start the estimator:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run d1_towers towers.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run d1_towers towers</code></pre></div>
+<pre class="out">[INFO] [...] [towers]: A | B | C | D</pre>
+<p>Four blocks on the table: four towers of one block.</p>
+</li>
+
+<li>
+<h3>Move the blocks, read the sentence</h3>
+<p>Open a third terminal (<strong>T3</strong>, with the <code>for</code> line). Put C on top of D, using the service of C4: D is at y = 0.18, so C goes to y = 0.18, one block higher (z = 0.375).</p>
+<pre class="cmd"><code>gz service -s /world/lab/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "block_C" position: {x: 0.50, y: 0.18, z: 0.375}'
+sleep 3
+gz service -s /world/lab/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "block_A" position: {x: 0.50, y: -0.06, z: 0.375}'
+</code></pre>
+<pre class="out">data: true
+
+data: true</pre>
+<p>(<code>data: true</code> means the service worked.) Look at T2:</p>
+<pre class="out">[INFO] [...] [towers]: A | B | DC
+[INFO] [...] [towers]: BA | DC</pre>
+<p>After the first move, "C is on D" appears as the tower <code>DC</code>. After the second, A is on B: <code>BA</code>. Each move gave exactly one new line: the 20 pose messages per second per block did not.</p>
+<p>The sentence is also on a topic. Read it from T3:</p>
+<pre class="cmd"><code>ros2 topic echo /towers --once</code></pre>
+<pre class="out">data: BA | DC
+---</pre>
+</li>
+
+<li>
+<h3>A late subscriber</h3>
+<p>This <code>echo</code> started long after the last change and still got the answer at once: the transient-local quality of service at work. Without it, <code>--once</code> would have waited for the next change. Check the setting of the publisher:</p>
+<pre class="cmd"><code>ros2 topic info /towers -v | grep Durability</code></pre>
+<pre class="out">  Durability: TRANSIENT_LOCAL</pre>
+<p>(That is the publisher's setting; <code>echo</code> adapts its own to it.) In the test run, a late <code>echo</code> also got the last sentence from the C++ estimator after the Python one was stopped.</p>
+</li>
+</ol>
+
+<h2>4. Check</h2>
+<ul>
+<li>The estimator printed <code>A | B | C | D</code> at the start.</li>
+<li>After C was moved onto D, it printed <code>A | B | DC</code>, and after A onto B, <code>BA | DC</code>.</li>
+<li>One line per change; none while nothing moves.</li>
+<li><code>ros2 topic echo /towers --once</code> printed the last sentence immediately.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Now move block A from B onto C (C is on D, at y = 0.18, so A's centre goes to z = 0.425). What does the estimator print? Then move block B onto A and predict again.</p>
+<details>
+<summary>Answer</summary>
+<pre class="cmd"><code>gz service -s /world/lab/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "block_A" position: {x: 0.50, y: 0.18, z: 0.425}'
+sleep 3
+gz service -s /world/lab/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "block_B" position: {x: 0.50, y: 0.18, z: 0.475}'
+</code></pre>
+<pre class="out">B | DCA
+DCAB</pre>
+<p>A leaves B, so B is alone again: <code>B | DCA</code>, a tower of three. Then B goes on top of A: one tower of four, <code>DCAB</code>. The heights after the test run, from the simulator: D 0.325, C 0.375, A 0.425, B 0.475 (each a micrometre below, as in C3): the stack is stable.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>Geometric state (poses) versus <strong>symbolic state</strong> (which block is on which). The estimator turns the first into the second.</li>
+<li>"X is on Y": centres within 3 cm in x and y, and one block height (5 cm ± 1 cm) apart in z. "On the table": z = 0.325 ± 0.01. Otherwise the block is in the air.</li>
+<li>Towers: start at the blocks on the table, follow "is on" upwards; written bottom to top, e.g. <code>DCA</code>.</li>
+<li>Publish the state only when it changes, with <strong>transient local</strong> QoS so that late subscribers get the last state at once.</li>
+<li>Not tested here: a block carried by a gripper (D2), more than four blocks, noisy poses from the camera instead of the ground truth.</li>
+</ul>
+
+<nav class="pager">
+<a href="c5-moveit-in-gazebo.html"><small>Previous</small>C5 · MoveIt with the simulated arm</a>
+<span class="soon next"><small>Next</small>D2 · Pick and place (coming soon)</span>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

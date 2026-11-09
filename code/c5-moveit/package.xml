@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>c5_moveit</name>
+  <version>0.1.0</version>
+  <description>Lesson C5: MoveIt 2 move_group for the Gen3 simulated in Gazebo (launch file)</description>
+  <maintainer email="you@example.com">course</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>kinova_gen3_7dof_robotiq_2f_85_moveit_config</exec_depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>c3_world</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

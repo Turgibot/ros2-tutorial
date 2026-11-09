@@ -6,6 +6,7 @@ robotiq_2f_85, `x y z` set where the arm is spawned, and RViz is off by default.
 description and the controller names are the same as in the upstream launch file, so a program written for this
 one also works with the fake hardware and (in principle) with the real arm."""
 import os
+import re
 
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
@@ -30,10 +31,16 @@ def launch_setup(context, *args, **kwargs):
     robot_description_content = Command([
         PathJoinSubstitution([FindExecutable(name="xacro")]), " ",
         PathJoinSubstitution([FindPackageShare("kortex_description"), "robots", "kinova.urdf.xacro"]), " ",
-        "robot_ip:=xxx.yyy.zzz.www name:=gen3 arm:=gen3 dof:=7 vision:=false prefix:=\"\" sim_gazebo:=true ",
+        "robot_ip:=xxx.yyy.zzz.www name:=gen3 arm:=gen3 dof:=7 prefix:=\"\" sim_gazebo:=true ",
+        "vision:=", LaunchConfiguration("vision"), " ",
         "gazebo_renderer:=ogre2 ",
         "simulation_controllers:=", controllers, " gripper:=", gripper])
     robot_description = robot_description_content.perform(context)
+    if LaunchConfiguration("sensors_in_world").perform(context) == "true":
+        # Gazebo may have only one Sensors system (the camera renderer). The robot description adds one, and so
+        # does a world that has cameras of its own: two of them crash the simulator. Remove the robot's.
+        robot_description = re.sub(r'<plugin filename="gz-sim-sensors-system".*?</plugin>', "", robot_description,
+                                   flags=re.S)
 
     # Gazebo: -r runs at once, -s is the server only (no window; --headless-rendering lets cameras render without a display)
     gz_args = "-r -v 3 " + ("" if gui == "true" else "-s --headless-rendering ") + world + \
@@ -81,6 +88,9 @@ def generate_launch_description():
         DeclareLaunchArgument("x", default_value="0.0"),
         DeclareLaunchArgument("y", default_value="0.0"),
         DeclareLaunchArgument("z", default_value="0.0"),
+        DeclareLaunchArgument("vision", default_value="false", description="true: add the wrist camera (a Realsense) to the arm"),
+        DeclareLaunchArgument("sensors_in_world", default_value="false",
+                              description="true if the world file already has the Sensors system (the C3 lab does)"),
         DeclareLaunchArgument("launch_rviz", default_value="false"),
     ]
     return LaunchDescription(args + [OpaqueFunction(function=launch_setup)])

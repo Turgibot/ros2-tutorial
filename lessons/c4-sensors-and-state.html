@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C4 · Sensors and state</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part C · Simulation with Gazebo</span></header>
+<main>
+
+<h1>C4 · Sensors and state over ROS</h1>
+<p class="lead">The arm and the lab together, and what a program can read from them: joint states, the true position of every block, and camera images.</p>
+
+<h2>1. Goal</h2>
+<p>Everything D needs to know about the world comes through ROS 2 topics. This lesson puts the arm of C2 into the lab of C3 and looks at three kinds of information:</p>
+<ul>
+<li><strong>joint states</strong>, from the controllers (what the arm knows about itself),</li>
+<li><strong>ground truth</strong>, from the simulator (where each block really is: a real lab has no such thing),</li>
+<li><strong>images</strong>, from cameras (what a real arm would have to use).</li>
+</ul>
+<p>At the end you will have:</p>
+<ul>
+<li>started the arm in the lab, with a camera on its wrist,</li>
+<li>turned the block poses into TF frames, so <code>tf2_echo</code> can answer "where is block A?",</li>
+<li>looked at the world through the wrist camera,</li>
+<li>and found a block in an image with a few lines of code, and checked the answer against the ground truth (within 5 mm).</li>
+</ul>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>All of it was run in the course container, headless. The Gazebo window was not used (so no screenshots of it); the pictures on this page come from cameras in the simulation. The real arm and its camera were not tried. The camera rates were much lower than their settings (see step 6); the cause was not investigated.</p></div>
+
+<div class="callout ok"><strong class="t">Open question from the environment test: solved</strong>
+<p>The first test of the upstream simulation (see PLAN.md) had camera topics but no image for 40 s. Two things were needed here: the robot description's default render engine is <code>ogre</code>, and the launch file now passes <code>ogre2</code> (the engine the rest of Gazebo Harmonic uses); and the simulator must be started with <code>--headless-rendering</code> when there is no window. With both, images arrive. I did not test <code>ogre</code> alone in the new setup, so I cannot say that the engine was the only cause.</p></div>
+
+<h2>2. Concepts</h2>
+<h3>Three sources of state</h3>
+<table>
+<tr><th>What</th><th>Comes from</th><th>On a real arm</th></tr>
+<tr><td>joint positions, velocities</td><td><code>joint_state_broadcaster</code> reading the hardware component</td><td>the same: motor encoders</td></tr>
+<tr><td>poses of the blocks</td><td>Gazebo, through a plugin: <strong>ground truth</strong></td><td>does not exist: it must be estimated from images</td></tr>
+<tr><td>images</td><td>camera sensors, rendered by Gazebo</td><td>real cameras</td></tr>
+</table>
+<p>Ground truth is the great advantage of the simulator: the true answer is available, so a method that works from images can be checked against it, as step 7 does. The plan of the course is to use ground truth for the logic of Part D and keep the camera path for a later switch to the real arm.</p>
+
+<h3>One time, everywhere</h3>
+<p>Every message here carries a header with a time stamp, and in the simulation that time is the <strong>simulated</strong> time (<code>/clock</code>): the joint states at 25.6 s, a camera image at 28.5 s. Programs that publish TF must use the same time, so the block poses keep the stamp of the message they came from, which is what <code>block_tf</code> does below.</p>
+
+<h3>The two frames that are one</h3>
+<p>The block poses are in the Gazebo world's frame (<code>frame_id: lab</code>). The arm's own root frame is <code>base_link</code>. The arm is spawned at the origin of the world with no rotation, so these are the same place, and <code>block_tf</code> publishes the blocks as children of <code>base_link</code> without any conversion. If you spawn the arm somewhere else (the <code>x y z</code> arguments of C2), the blocks' coordinates in <code>base_link</code> would differ and a transform would be needed. That is a reason to keep it at the origin in this course.</p>
+
+<h3>The pinhole camera</h3>
+<p>A simulated camera follows the pinhole model: a point at distance <code>d</code> in front of the camera, at lateral offset <code>X</code>, appears at pixel <code>u = cx + fx·X/d</code>. The numbers <code>fx, fy, cx, cy</code> are in the <code>camera_info</code> message (the matrix <code>K</code>). For an image of width <code>w</code> and horizontal field of view <code>θ</code>:</p>
+<pre class="math">fx = (w / 2) / tan(θ / 2) = 320 / tan(0.5) = 585.8      (the overhead camera: w = 640, θ = 1.0 rad)
+cx = 320, cy = 240   (the middle of the image)</pre>
+<p>Turning it around: a pixel and the distance <code>d</code> give the lateral position <code>X = (u − cx)·d / fx</code>. The distance cannot come from one image alone. Here the camera looks straight down at a known height, and the top of a block is at a known height, so <code>d</code> is known.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span> (If you built <code>c2-sim</code> and <code>c3-world</code> in C3, rebuild <code>c3-world</code>: this lesson adds programs and a launch file.)</p>
+<pre class="cmd"><code>cd code/c2-sim
+colcon build
+source install/setup.bash
+cd ../c3-world
+colcon build
+source install/setup.bash</code></pre>
+</li>
+
+<li>
+<h3>The arm in the lab</h3>
+<pre class="src" data-file="code/c3-world/launch/lab_arm.launch.py"><code>"""The lab world (C3) with the Gen3 standing at its origin (C2), and bridges for the cameras and the block poses.
+Arguments: gui (Gazebo window), vision (add the wrist camera to the arm)."""
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    lab = get_package_share_directory("c3_world")
+    sim = os.path.join(get_package_share_directory("c2_sim"), "launch", "sim.launch.py")
+
+    bridge_args = ["/overhead_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+                   "/overhead_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+                   "/side_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+                   "/wrist_mounted_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+                   "/wrist_mounted_camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image",
+                   "/wrist_mounted_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"]
+    bridge_args += [f"/model/block_{k}/pose@geometry_msgs/msg/PoseStamped[gz.msgs.Pose" for k in "ABCD"]
+
+    return LaunchDescription([
+        DeclareLaunchArgument("gui", default_value="true"),
+        DeclareLaunchArgument("vision", default_value="false"),
+        AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.path.join(lab, "models")),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(sim),
+            launch_arguments={"world": os.path.join(lab, "worlds", "lab.sdf"),
+                              "gui": LaunchConfiguration("gui"),
+                              "vision": LaunchConfiguration("vision"),
+                              "sensors_in_world": "true"}.items()),
+        Node(package="ros_gz_bridge", executable="parameter_bridge", output="screen",
+             parameters=[{"use_sim_time": True}], arguments=bridge_args),
+    ])</code></pre>
+<p>It includes the launch file of C2 with the lab world, and adds a bridge for three cameras and the four block poses. Two arguments go to the C2 file that did not exist in C2: <code>vision</code> adds a camera (a Realsense) to the arm's wrist, and <code>sensors_in_world</code> tells it that the world already has the <code>Sensors</code> system (the camera renderer), so that it must remove the one the robot description would add. Gazebo can have only one: with two the simulator aborts with an <code>Ogre::ItemIdentityException</code> ("HLMS Datablock already exists"), which is what happened when I first combined them.</p>
+<p><span class="where box">container</span> T1:</p>
+<pre class="cmd"><code>ros2 launch c3_world lab_arm.launch.py vision:=true</code></pre>
+<p>This opens the Gazebo window (<code>gui:=true</code> is the default, as in C2). Add <code>gui:=false</code> if there is no display. Wait about 30 s. The ground, the table, the blocks, the two cameras and the arm (<code>gen3</code>) are in the world.</p>
+</li>
+
+<li>
+<h3>What is on the ROS 2 side</h3>
+<p>Open a second terminal (<strong>T2</strong>: <code>docker/run_ros2.sh</code>, in the <code>ros2-tutorial</code> folder), then:</p>
+<pre class="cmd"><code>cd code/c3-world
+source install/setup.bash
+ros2 topic list | grep -E "camera|block|joint_states|clock|tf"</code></pre>
+<pre class="out">/clock
+/dynamic_joint_states
+/joint_states
+/model/block_A/pose
+/model/block_B/pose
+/model/block_C/pose
+/model/block_D/pose
+/overhead_camera/camera_info
+/overhead_camera/image
+/side_camera/image
+/tf
+/tf_static
+/wrist_mounted_camera/camera_info
+/wrist_mounted_camera/depth_image
+/wrist_mounted_camera/image
+</pre>
+<p>(<code>/dynamic_joint_states</code> is the same information in another message type.) The camera topics are there because the launch file bridges them; Gazebo has them under the same names.</p>
+</li>
+
+<li>
+<h3>Joint states, with simulated time</h3>
+<p><span class="where box">container</span> T2:</p>
+<pre class="cmd"><code>ros2 topic echo /joint_states --once --field header</code></pre>
+<pre class="out">stamp:
+  sec: 25
+  nanosec: 609000000
+frame_id: base_link
+---</pre>
+<p>The time is the simulated time. (As in C2 the topic runs at 1000 Hz, so <code>echo</code> may print <code>A message was lost!!!</code> first.) The joint values are as in C2.</p>
+</li>
+
+<li>
+<h3>Where is block A? Blocks as TF frames</h3>
+<p>The poses on <code>/model/block_X/pose</code> are messages; for the question "where is block A relative to the hand?" the TF tree (A6) is the tool, because it chains transforms. This program publishes each block as a frame under <code>base_link</code>.</p>
+<div class="lang py"><pre class="src" data-file="code/c3-world/py/block_tf.py"><code>#!/usr/bin/env python3
+"""Turn the ground-truth block poses from Gazebo into TF frames: base_link -&gt; block_A ... block_D.
+
+The arm stands at the origin of the Gazebo world, so the world frame and the arm's base_link are the same place."""
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, TransformStamped
+from tf2_ros import TransformBroadcaster
+
+
+class BlockTf(Node):
+    def __init__(self):
+        super().__init__("block_tf")
+        self.broadcaster = TransformBroadcaster(self)
+        for k in "ABCD":
+            self.create_subscription(PoseStamped, f"/model/block_{k}/pose",
+                                     lambda msg, k=k: self.on_pose(k, msg), 10)
+
+    def on_pose(self, k, msg):
+        t = TransformStamped()
+        t.header.stamp = msg.header.stamp              # simulated time, as in every other message
+        t.header.frame_id = "base_link"
+        t.child_frame_id = f"block_{k}"
+        t.transform.translation.x = msg.pose.position.x
+        t.transform.translation.y = msg.pose.position.y
+        t.transform.translation.z = msg.pose.position.z
+        t.transform.rotation = msg.pose.orientation
+        self.broadcaster.sendTransform(t)
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(BlockTf())
+
+
+if __name__ == "__main__":
+    main()</code></pre></div>
+<div class="lang cpp"><pre class="src" data-file="code/c3-world/cpp/block_tf.cpp"><code>// Turn the ground-truth block poses from Gazebo into TF frames: base_link -&gt; block_A ... block_D.
+// The arm stands at the origin of the Gazebo world, so the world frame and the arm's base_link are the same place.
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;geometry_msgs/msg/pose_stamped.hpp&gt;
+#include &lt;geometry_msgs/msg/transform_stamped.hpp&gt;
+#include &lt;rclcpp/rclcpp.hpp&gt;
+#include &lt;tf2_ros/transform_broadcaster.h&gt;
+
+class BlockTf : public rclcpp::Node {
+public:
+  BlockTf() : Node("block_tf"), broadcaster_(this) {
+    for (char k : std::string("ABCD")) {
+      subs_.push_back(create_subscription&lt;geometry_msgs::msg::PoseStamped&gt;(
+          std::string("/model/block_") + k + "/pose", 10,
+          [this, k](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { on_pose(k, *msg); }));
+    }
+  }
+
+private:
+  void on_pose(char k, const geometry_msgs::msg::PoseStamped &amp;msg) {
+    geometry_msgs::msg::TransformStamped t;
+    t.header.stamp = msg.header.stamp;               // simulated time, as in every other message
+    t.header.frame_id = "base_link";
+    t.child_frame_id = std::string("block_") + k;
+    t.transform.translation.x = msg.pose.position.x;
+    t.transform.translation.y = msg.pose.position.y;
+    t.transform.translation.z = msg.pose.position.z;
+    t.transform.rotation = msg.pose.orientation;
+    broadcaster_.sendTransform(t);
+  }
+
+  tf2_ros::TransformBroadcaster broadcaster_;
+  std::vector&lt;rclcpp::Subscription&lt;geometry_msgs::msg::PoseStamped&gt;::SharedPtr&gt; subs_;
+};
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared&lt;BlockTf&gt;());
+  rclcpp::shutdown();
+  return 0;
+}</code></pre></div>
+<p><span class="where box">container</span> T2:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run c3_world block_tf.py</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run c3_world block_tf</code></pre></div>
+<p>Leave it running, open a third terminal (<strong>T3</strong>, same preparation: <code>docker/run_ros2.sh</code>, then <code>cd code/c3-world</code> and <code>source install/setup.bash</code>), and ask for the blocks:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link block_A
+ros2 run tf2_ros tf2_echo base_link block_D</code></pre>
+<pre class="out">At time 28.100000000
+- Translation: [0.500, -0.180, 0.325]
+- Rotation: in Quaternion (xyzw) [-0.000, 0.000, 0.000, 1.000]
+- Rotation: in RPY (radian) [-0.000, 0.000, -0.000]
+- Rotation: in RPY (degree) [-0.000, 0.000, -0.000]
+At time 33.100000000
+- Translation: [0.500, 0.180, 0.325]</pre>
+<p>(Press Ctrl+C after each. At the very start <code>tf2_echo</code> may first print <code>Waiting for transform ... frame does not exist</code> for a moment. The time stamps depend on when you ask.) These are the numbers of the world file of C3. Now <code>tf2_echo end_effector_link block_A</code> would give the pose of the block <em>in the hand's frame</em>, which is what a grasp needs; D2 uses it.</p>
+</li>
+
+<li>
+<h3>Look through the wrist camera</h3>
+<p>Send the arm to a pose with the hand above the table, pointing down. The joint angles come from the IK of B3 for the target position (0.50, 0, 0.55), roll 180°, pitch 0, yaw 90°, which is "hand pointing straight down, fingers along y". A pose has many joint solutions (the null space of B3); this one has joint 3 fixed at 2.5 rad on purpose: the first solution the solver finds has joint 3 at 3.14, right at the ±π edge, which MoveIt later treats as out of bounds (D2 comes back to this). The gripper is opened first. <span class="where box">container</span> T3:</p>
+<pre class="cmd"><code>ros2 action send_goal /robotiq_gripper_controller/gripper_cmd control_msgs/action/ParallelGripperCommand "{command: {name: [robotiq_85_left_knuckle_joint], position: [0.0]}}"
+ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.2922, 0.5376, 2.5, -0.8983, 0.3191, -1.7866, 1.3632], time_from_start: {sec: 8}}]}}"
+ros2 run tf2_ros tf2_echo base_link end_effector_link
+</code></pre>
+<pre class="out">Goal accepted with ID: ...
+Result:
+...
+Goal finished with status: SUCCEEDED
+...
+Goal finished with status: SUCCEEDED
+- Translation: [0.500, 0.002, 0.550]
+- Rotation: in RPY (degree) [180.000, -0.002, 90.002]</pre>
+<p>(The two <code>send_goal</code> commands print their usual result lines; press Ctrl+C on <code>tf2_echo</code>.) The hand is where the IK put it: 0.50 m forward, 0.55 m up, rotated by 180°, 0°, 90°. Now take a picture with the wrist camera and one with the side camera (the tool of C3):</p>
+<pre class="cmd"><code>python3 py/save_image.py /wrist_mounted_camera/image /workspace/wrist.png
+python3 py/save_image.py /side_camera/image /workspace/side.png</code></pre>
+<p>The files are written to the repository folder (<code>/workspace</code> is the repository, mounted in the container), so you can open them from your computer. This is what the test run saw:</p>
+<figure><img src="img/c4-side-arm.png" alt="the gripper above the row of blocks, seen from the side" width="640" height="480">
+<figcaption>The side camera: the arm's hand, pointing down, over blocks B and C (between them, 0.55 m up). The dark shape on the table is the arm's shadow.</figcaption></figure>
+<figure><img src="img/c4-wrist.png" alt="a view from the gripper: blocks C and B on the table, two finger tips at the bottom" width="640" height="480">
+<figcaption>The wrist camera at the same moment: block C on the left and block B on the right, and the tips of the two open fingers in the bottom corners. The camera is on the wrist, so it moves with the hand and always shows what is in front of the gripper.</figcaption></figure>
+<p>This is the picture a grasping program would work from. The camera also gives a depth image (<code>/wrist_mounted_camera/depth_image</code>, encoding <code>32FC1</code>: one 32-bit float per pixel, the distance in metres) and a <code>camera_info</code>.</p>
+</li>
+
+<li>
+<h3>Find a block in an image, and compare with the truth</h3>
+<p>The overhead camera looks straight down from 1.3 m. The program below finds the pixels of one block's colour (in the HSV colour space, where a colour is a "hue" number and so does not change much with light and shade), takes their centre, and turns the pixel into table coordinates with the formula of the Concepts. It is a small Python tool, like <code>save_image.py</code>.</p>
+<pre class="src" data-file="code/c3-world/py/pixel_to_table.py"><code>#!/usr/bin/env python3
+"""Find a block in the overhead camera image by its colour and turn the pixel into table coordinates:
+pixel_to_table.py LETTER      (A red, B blue, C green, D yellow)
+
+The camera is at (0.65, 0, 1.3) looking straight down (see worlds/lab.sdf); the top of a block is at z = 0.35."""
+import sys
+import cv2
+import numpy as np
+import rclpy
+from cv_bridge import CvBridge
+from rclpy.node import Node
+from sensor_msgs.msg import CameraInfo, Image
+
+CAM_X, CAM_Y, CAM_Z = 0.65, 0.0, 1.3
+BLOCK_TOP_Z = 0.35
+# hue ranges (OpenCV: 0..179) of the four block colours
+HUE = {"A": [(0, 8), (172, 179)], "B": [(100, 125)], "C": [(50, 80)], "D": [(20, 35)]}
+
+
+def main():
+    letter = sys.argv[1]
+    rclpy.init()
+    node = Node("pixel_to_table")
+    box = {}
+    node.create_subscription(CameraInfo, "/overhead_camera/camera_info", lambda m: box.setdefault("info", m), 1)
+    node.create_subscription(Image, "/overhead_camera/image", lambda m: box.setdefault("img", m), 1)
+    while rclpy.ok() and len(box) &lt; 2:
+        rclpy.spin_once(node, timeout_sec=0.5)
+
+    fx, fy, cx, cy = box["info"].k[0], box["info"].k[4], box["info"].k[2], box["info"].k[5]
+    bgr = CvBridge().imgmsg_to_cv2(box["img"], "bgr8")
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    mask = np.zeros(hsv.shape[:2], bool)
+    for lo, hi in HUE[letter]:
+        mask |= (hsv[:, :, 0] &gt;= lo) &amp; (hsv[:, :, 0] &lt;= hi) &amp; (hsv[:, :, 1] &gt; 100) &amp; (hsv[:, :, 2] &gt; 60)
+    v, u = np.nonzero(mask)
+    u, v = u.mean(), v.mean()                      # centre of the coloured pixels
+    d = CAM_Z - BLOCK_TOP_Z                        # distance from the camera to the top of the block
+    x = CAM_X + (cy - v) / fy * d                  # image up is +x
+    y = CAM_Y + (cx - u) / fx * d                  # image left is +y
+    print(f"fx = {fx:.1f}  fy = {fy:.1f}  cx = {cx:.1f}  cy = {cy:.1f}")
+    print(f"block {letter}: {mask.sum()} pixels, centre at pixel u = {u:.1f}, v = {v:.1f}")
+    print(f"        table position x = {x:.3f} m, y = {y:.3f} m")
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+<p>Return the arm to a neutral place first, so it does not hide the blocks (T3, the arm to zeros: it stands up straight, out of the camera's picture), then run it for the four letters:</p>
+<pre class="cmd"><code>ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "{trajectory: {joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6, joint_7], points: [{positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 6}}]}}"
+for k in A B C D; do ros2 run c3_world pixel_to_table.py $k; done</code></pre>
+<pre class="out">fx = 585.8  fy = 585.8  cx = 320.0  cy = 240.0
+block A: 662 pixels, centre at pixel u = 428.1, v = 330.1
+        table position x = 0.504 m, y = -0.175 m
+fx = 585.8  fy = 585.8  cx = 320.0  cy = 240.0
+block B: 553 pixels, centre at pixel u = 356.5, v = 330.4
+        table position x = 0.503 m, y = -0.059 m
+fx = 585.8  fy = 585.8  cx = 320.0  cy = 240.0
+block C: 561 pixels, centre at pixel u = 282.8, v = 331.5
+        table position x = 0.502 m, y = 0.060 m
+fx = 585.8  fy = 585.8  cx = 320.0  cy = 240.0
+block D: 779 pixels, centre at pixel u = 211.2, v = 330.5
+        table position x = 0.503 m, y = 0.176 m</pre>
+<p>Compare with the truth of C3 (x = 0.500; y = −0.180, −0.060, 0.060, 0.180): the camera's answer is within 5 mm everywhere (the largest error is 5 mm, in the y of block A). <code>fx</code> = 585.8 is the number computed in the Concepts. (In the test run the arm was at its zero pose, standing straight up, which is outside the picture.) Where does the error come from? The coloured pixels include the sides of a block, which are seen at a slant away from the middle of the image, and the white letter is not counted, so the centre is not exactly the middle of the top face. This is why a ground-truth channel is useful: you can measure how good a camera method is.</p>
+</li>
+
+<li>
+<h3>Move a block, and watch both channels follow</h3>
+<p>Gazebo can move a model by hand: the <code>set_pose</code> service of the world. Move block D 7 cm further to the left, onto y = 0.25 m (from a little above the table, so that it settles): <span class="where box">container</span> T3:</p>
+<pre class="cmd"><code>gz service -s /world/lab/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "block_D" position: {x: 0.50, y: 0.25, z: 0.33}'
+sleep 3
+ros2 run tf2_ros tf2_echo base_link block_D
+ros2 run c3_world pixel_to_table.py D
+</code></pre>
+<pre class="out">data: true
+
+At time 42.700000000
+- Translation: [0.500, 0.250, 0.325]
+fx = 585.8  fy = 585.8  cx = 320.0  cy = 240.0
+block D: 794 pixels, centre at pixel u = 168.8, v = 330.4
+        table position x = 0.503 m, y = 0.245 m
+</pre>
+<p>The ground truth followed (y = 0.250, z back at 0.325 after the small drop) and so did the camera, which now says y = 0.245 m: 5 mm off again. Where should block D be in the image? <code>u = cx + (y_cam − y)·fx/d</code>, with the camera at y = 0 (the formula of the Concepts, left = +y): <code>320 − 0.25 × 585.8 / 0.95 = 165.8</code>, and the program found 168.8. The difference, 3 pixels, is the same bias as before.</p>
+</li>
+</ol>
+
+<div class="callout"><strong class="t">The camera rates</strong>
+<p>The sensors are set to 10 Hz (the two cameras of the lab) and 6 Hz (the wrist camera), but <code>ros2 topic hz</code> measured about 7 Hz for the overhead camera when the lab runs alone (C3), and only about 1 to 2 Hz for both overhead and wrist cameras with the arm in the world. The real-time factor stayed at 1.0, so the simulation itself was not slowed down. Whether the cause is the rendering, the bridge copying 0.9 MB images, or both, was not investigated. It does not matter for the lessons (the blocks do not move while the camera is read), but a program that needs a steady video would have to deal with it.</p></div>
+
+<h2>4. Check</h2>
+<ul>
+<li>The topic list has <code>/joint_states</code>, the four block poses and the cameras' images.</li>
+<li><code>tf2_echo base_link block_A</code> prints [0.500, −0.180, 0.325].</li>
+<li>The wrist camera shows blocks between the fingers, the side camera shows the hand over the row.</li>
+<li><code>pixel_to_table.py</code> finds every block within about 5 mm of the truth.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>Move block B to x = 0.40, y = −0.10 and predict the pixel (u, v) where <code>pixel_to_table.py B</code> will say its centre is. Use <code>u = cx + (y_cam − y)·fx/d</code> and <code>v = cy + (x_cam − x)·fy/d</code> with the camera at (0.65, 0), d = 0.95 m.</p>
+<details>
+<summary>Answer</summary>
+<pre class="math">u = 320 + (0 − (−0.10)) × 585.8 / 0.95 = 320 + 61.7 = 381.7
+v = 240 + (0.65 − 0.40) × 585.8 / 0.95 = 240 + 154.2 = 394.2</pre>
+<p>So B should appear about 62 pixels to the right of the middle and 154 pixels below it (image up is +x: a block closer to the arm is lower in the picture). Run in the simulator, the program found the centre at pixel (380.6, 390.3): the same column and 4 pixels from the predicted row, and said table position (0.406, −0.098), that is 6 mm and 2 mm from the truth (a little more than before, because the block is further from the middle of the image and its side faces show more).</p>
+<pre class="cmd"><code>gz service -s /world/lab/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 --req 'name: "block_B" position: {x: 0.40, y: -0.10, z: 0.33}'
+sleep 3
+ros2 run c3_world pixel_to_table.py B</code></pre>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>Three sources of state: <code>/joint_states</code> (from the controllers), <code>/model/NAME/pose</code> (ground truth from Gazebo, only in simulation), and camera topics (<code>image</code>, <code>depth_image</code>, <code>camera_info</code>).</li>
+<li>Everything is time-stamped with simulated time. Poses become TF frames with a broadcaster that reuses the message's stamp (<code>block_tf</code>), and the arm at the world's origin makes <code>base_link</code> and the world the same frame.</li>
+<li>Gazebo accepts only one <code>Sensors</code> system. The camera images need <code>ogre2</code> and, without a window, <code>--headless-rendering</code>. This solves the missing-image problem noted in the environment test.</li>
+<li>Pinhole camera: <code>fx = (w/2)/tan(θ/2)</code>, <code>X = (u − cx)·d/fx</code>. With a known distance a colour blob gives a block position within 5 mm.</li>
+<li>Camera frame rates were below the sensor settings (cause not investigated).</li>
+</ul>
+
+<nav class="pager">
+<a href="c3-table-and-blocks.html"><small>Previous</small>C3 · A table and lettered blocks</a>
+<a class="next" href="c5-moveit-in-gazebo.html"><small>Next</small>C5 · MoveIt with the simulated arm</a>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>

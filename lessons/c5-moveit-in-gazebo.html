@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C5 · MoveIt with the simulated arm</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site"><a href="index.html">ROS 2 + Kinova Gen3</a><small>by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a></small><span>Part C · Simulation with Gazebo</span></header>
+<main>
+
+<h1>C5 · MoveIt with the simulated arm</h1>
+<p class="lead">The planner of B4, now driving the arm in Gazebo. The surprise: MoveIt cannot see Gazebo's table.</p>
+
+<h2>1. Goal</h2>
+<p>In B4 MoveIt planned for a fake arm. Here the same <code>move_group</code> plans for the arm that runs in the physics simulator, and the programs of B4 work without a change. At the end you will have:</p>
+<ul>
+<li>started <code>move_group</code> for the simulated arm, on simulated time,</li>
+<li>planned and executed a motion above the table with <code>move_pose</code> of B4,</li>
+<li>copied the table and the blocks into MoveIt's planning scene (it does not see Gazebo's world),</li>
+<li>watched MoveIt refuse a goal in the table, and plan a descent between the fingers' limits,</li>
+<li>and seen what happens when the scene does not know about the table: MoveIt is happy, and the table stops the arm.</li>
+</ul>
+<div class="callout warn"><strong class="t">What was and was not run</strong>
+<p>Run in the course container, Gazebo headless, with the programs of B4: Python for the whole sequence, and the C++ <code>move_pose</code> for the first three moves (above the table, into the table, down around block B), with the same results. The gripper was not driven through MoveIt (see Concepts), and RViz with MoveIt and Gazebo together was not tried. Planning is random and not every run is as clean as the one shown (see step 7).</p></div>
+
+<h2>2. Concepts</h2>
+<h3>What stays the same</h3>
+<p>MoveIt sends a trajectory to a <code>FollowJointTrajectory</code> action: <code>/joint_trajectory_controller/follow_joint_trajectory</code>. The fake arm of B4, the Gazebo arm of C2 and a real arm all offer that action under that name. So <code>move_group</code> and the programs of B4 do not know which one they talk to. That is the point of the twin.</p>
+<h3>What changes: the simulated clock</h3>
+<p>The joint states carry simulated time (C4), so <code>move_group</code> must run with <code>use_sim_time</code>, or it compares two different clocks and refuses the states as stale. The launch file of this lesson sets it.</p>
+<h3>Two worlds that do not know each other</h3>
+<p>Gazebo has a world with physics: the table and the blocks are in the file <code>lab.sdf</code>. MoveIt has its own <strong>planning scene</strong> (B4): the arm and what you tell it about. Nothing connects them. MoveIt does not read the SDF; Gazebo does not read the scene. If the table is not in the planning scene, MoveIt plans straight through it, and Gazebo's arm hits it for real. Keeping the two in step is your job. In this lesson it is done once, by hand, with <code>add_box</code> of B4. In D the blocks that move are left out of the scene on purpose (see D2).</p>
+<h3>Kinova's own launch file</h3>
+<p>Kinova's MoveIt package has a <code>sim.launch.py</code>, but it starts <code>move_group</code> only together with RViz and with its log switched off (<code>--log-level fatal</code>, to hide warnings about mimic joints). The launch file of this course starts just <code>move_group</code>, with its log on, and RViz only if you ask (<code>launch_rviz:=true</code>, not tried here).</p>
+<h3>The gripper</h3>
+<p>Kinova's MoveIt configuration (<code>moveit_controllers.yaml</code>) lists the gripper controller with the type <code>GripperCommand</code>. The Gazebo arm's gripper controller speaks <code>ParallelGripperCommand</code> (C2). So MoveIt cannot drive that gripper as configured. This lesson does not try: the gripper is moved by the action command of C2, and so it will be in D.</p>
+
+<h2>3. Do it</h2>
+<ol class="steps">
+
+<li>
+<h3>Build</h3>
+<p class="env docker"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder and enter a container (this is <strong>T1</strong>):</p>
+<pre class="cmd env docker"><code>docker/run_ros2.sh</code></pre>
+<p class="env local"><span class="where host">host</span> Open a terminal in the <code>ros2-tutorial</code> folder (this is <strong>T1</strong>).</p>
+<p><span class="where box">container</span> Five packages in the chain: the launch files of C2 and C3, the programs of B4 and the launch file of this lesson.</p>
+<pre class="cmd"><code>for p in c2-sim c3-world b4-moveit c5-moveit; do (cd code/$p &amp;&amp; colcon build &amp;&amp; echo "built $p"); done</code></pre>
+<p>Each build prints its summary and then <code>built NAME</code>; the B4 build takes a minute and may print notes about a deprecated package (harmless). In <strong>every</strong> terminal of this lesson, source the four packages before using them:</p>
+<pre class="cmd"><code>for p in c2-sim c3-world b4-moveit c5-moveit; do source code/$p/install/setup.bash; done</code></pre>
+</li>
+
+<li>
+<h3>The launch file</h3>
+<pre class="src" data-file="code/c5-moveit/launch/move_group.launch.py"><code>"""MoveIt's move_group for the Gen3 that runs in Gazebo (started by c3_world lab_arm.launch.py or c2_sim sim.launch.py).
+
+Kinova's own sim.launch.py of the MoveIt package starts move_group only together with RViz and silences its log.
+This one starts just move_group (and RViz if asked), on simulated time. It plans; the trajectories go to the
+joint_trajectory_controller of the simulated arm, which has the same action name as the fake and the real arm."""
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+from moveit_configs_utils import MoveItConfigsBuilder
+import os
+
+PKG = "kinova_gen3_7dof_robotiq_2f_85_moveit_config"
+
+
+def generate_launch_description():
+    description_arguments = {
+        "robot_ip": "xxx.yyy.zzz.www", "use_fake_hardware": "false", "gripper": "robotiq_2f_85",
+        "dof": "7", "sim_gazebo": "true", "vision": "false",
+    }
+    moveit_config = (
+        MoveItConfigsBuilder("gen3", package_name=PKG)
+        .robot_description(mappings=description_arguments)
+        .trajectory_execution(file_path="config/moveit_controllers.yaml")
+        .planning_scene_monitor(publish_robot_description=True, publish_robot_description_semantic=True)
+        .planning_pipelines(pipelines=["ompl"])
+        .to_moveit_configs()
+    )
+    use_sim_time = {"use_sim_time": True}
+
+    move_group = Node(
+        package="moveit_ros_move_group", executable="move_group", output="screen",
+        parameters=[moveit_config.to_dict(), use_sim_time])
+
+    rviz = Node(
+        package="rviz2", executable="rviz2", name="rviz2_moveit", output="log",
+        arguments=["-d", os.path.join(get_package_share_directory(PKG), "config", "moveit.rviz")],
+        parameters=[moveit_config.robot_description, moveit_config.robot_description_semantic,
+                    moveit_config.robot_description_kinematics, moveit_config.planning_pipelines,
+                    moveit_config.joint_limits, use_sim_time],
+        condition=IfCondition(LaunchConfiguration("launch_rviz")))
+
+    return LaunchDescription([DeclareLaunchArgument("launch_rviz", default_value="false"), move_group, rviz])</code></pre>
+<p>It is the MoveIt configuration of B4 (the same Kinova package, the same planning group <code>manipulator</code>), with <code>sim_gazebo:=true</code> for the description and <code>use_sim_time</code> for the node.</p>
+</li>
+
+<li>
+<h3>Start Gazebo, then MoveIt</h3>
+<p><span class="where box">container</span> T1: source the packages (the line of step 1), then start the arm in the lab world, with a window (add <code>gui:=false</code> without a display):</p>
+<pre class="cmd"><code>ros2 launch c3_world lab_arm.launch.py</code></pre>
+<p>Open a second terminal (<strong>T2</strong>: <code>docker/run_ros2.sh</code> in the <code>ros2-tutorial</code> folder), source the packages, and start <code>move_group</code>:</p>
+<pre class="cmd"><code>ros2 launch c5_moveit move_group.launch.py</code></pre>
+<p>Wait for <code>You can start planning now!</code>. As in B4, the log has harmless noise (octomap, the class loader, <code>/recognize_objects</code>); and <code>move_group</code> may crash with a segmentation fault when you stop it with Ctrl+C.</p>
+<p>Open a third terminal (<strong>T3</strong>) for the commands below, and source the packages there too.</p>
+</li>
+
+<li>
+<h3>Plan and execute above the table</h3>
+<p>The hand goes 0.40 m forward, 0.50 m up, pointing down (roll 180°, pitch 0, yaw 90°: the hand of C4). <code>move_pose</code> is the program of B4. <span class="where box">container</span> T3:</p>
+<div class="lang py"><pre class="cmd"><code>ros2 run b4_moveit move_pose.py 0.40 0 0.50 180 0 90</code></pre></div>
+<div class="lang cpp"><pre class="cmd"><code>ros2 run b4_moveit move_pose 0.40 0 0.50 180 0 90</code></pre></div>
+<pre class="out">result: SUCCESS
+trajectory: 55 points, 5.31 s</pre>
+<p>(The number of points and the duration vary with the random planner.) Check where the hand really is:</p>
+<pre class="cmd"><code>ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">- Translation: [0.401, -0.000, 0.500]</pre>
+<p>(Ctrl+C after the first lines.) The simulated arm followed MoveIt's plan to within 1 mm. This is the side camera of C3:</p>
+<figure><img src="img/c5-hover.png" alt="the gripper pointing down above the table, left of the row of blocks" width="640" height="480"><figcaption>The hand 0.50 m up, pointing down, near the table's edge. The picture was taken with <code>py/save_image.py /side_camera/image</code> of C3.</figcaption></figure>
+</li>
+
+<li>
+<h3>Tell MoveIt about the table and the blocks</h3>
+<p>The same <code>add_box</code> as in B4, with the numbers of <code>lab.sdf</code> (C3): the table's centre (0.65, 0, 0.15) and size 0.6 × 0.9 × 0.3, and the four blocks at x = 0.50, y = −0.18, −0.06, 0.06, 0.18, z = 0.325, 5 cm cubes. <span class="where box">container</span> T3:</p>
+<pre class="cmd"><code>ros2 run b4_moveit add_box table 0.65 0 0.15 0.6 0.9 0.3
+for k in "A -0.18" "B -0.06" "C 0.06" "D 0.18"; do set -- $k; ros2 run b4_moveit add_box block_$1 0.50 $2 0.325 0.05 0.05 0.05; done</code></pre>
+<pre class="out">scene updated
+scene updated
+scene updated
+scene updated
+scene updated</pre>
+<p>Now try to go into the table. A hand at z = 0.32 m is only 2 cm above the table top (0.30 m), and the fingers hang about 15 cm below the hand, so they would be inside the table.</p>
+<pre class="cmd"><code>ros2 run b4_moveit move_pose.py 0.40 0 0.32 180 0 90</code></pre>
+<pre class="out">result: FAILURE</pre>
+<div class="lang cpp"><p>The C++ program prints <code>result: PLANNING FAILED (error code 99999)</code> instead.</p></div>
+<p>MoveIt refused. The client does not say why; the <code>move_group</code> terminal (T2) does: <code>Unable to sample any valid states for goal tree</code>. There is no valid joint configuration for that pose, because every one has the arm in the table.</p>
+</li>
+
+<li>
+<h3>Down between the blocks</h3>
+<p>The hand goes over block B (x = 0.50, y = −0.06), then down so that the fingers (which open along y) straddle it. The hand's frame, <code>end_effector_link</code>, is at the base of the fingers; the fingers reach about 14 to 15 cm below it. So the lowest hand height above a table at z = 0.30 is about 0.45 m. In the tests, 0.47 worked and 0.45 failed:</p>
+<pre class="cmd"><code>ros2 run b4_moveit move_pose.py 0.50 -0.06 0.55 180 0 90
+ros2 run b4_moveit move_pose.py 0.50 -0.06 0.47 180 0 90
+ros2 run b4_moveit move_pose.py 0.50 -0.06 0.45 180 0 90</code></pre>
+<pre class="out">result: SUCCESS
+trajectory: ...
+result: SUCCESS
+trajectory: ...
+result: FAILURE</pre>
+<p>(Expect <code>trajectory: N points, T s</code> lines after each success.) Reading the hand at 0.47 with <code>tf2_echo</code> gave 0.501, −0.060, 0.470. This is block B between the open fingers:</p>
+<figure><img src="img/c5-around-b.png" alt="the gripper over the blue block B, the fingers on both sides of it" width="640" height="480"><figcaption>Hand at z = 0.47 above block B: the fingers are on the two sides of the block, a few centimetres from it. The next lessons close them.</figcaption></figure>
+<p>Go back up before the next step: <code>ros2 run b4_moveit move_pose.py 0.50 -0.06 0.55 180 0 90</code>.</p>
+</li>
+
+<li>
+<h3>Forget the table</h3>
+<p>Remove the table from the scene, and ask for the same goal as in step 5, in the table:</p>
+<pre class="cmd"><code>ros2 run b4_moveit add_box table remove
+ros2 run b4_moveit move_pose.py 0.40 0 0.32 180 0 90
+ros2 run tf2_ros tf2_echo base_link end_effector_link</code></pre>
+<pre class="out">scene updated
+result: SUCCESS
+trajectory: 28 points, 2.62 s
+- Translation: [0.387, -0.066, 0.447]</pre>
+<p>MoveIt says <code>SUCCESS</code>: for it nothing was in the way. But the hand is at (0.387, −0.066, 0.447) and not at (0.40, 0, 0.32): the fingers hit the real table 13 cm above the goal and the arm stopped. It also ended 7 cm to the side of the goal: the plan is not followed when the arm is blocked, and what it does then is not predictable (two other runs ended at (0.378, 0.104, 0.453) and (0.370, 0.034, 0.455)).</p>
+<figure><img src="img/c5-pressed.png" alt="the gripper pressed on the table, beside the green and yellow blocks" width="640" height="480"><figcaption>The fingers on the table, where MoveIt planned to be 13 cm lower. In this run the fingers also pushed blocks A and B out of their places (to (0.51, −0.22) and (0.46, −0.18)).</figcaption></figure>
+<p>This is the lesson of C5: <strong>SUCCESS from MoveIt means "I sent a trajectory", not "the arm got there"</strong>. Like in C2, read the joint states or <code>tf2_echo</code> to know. And the blocks were pushed: restart T1 (Ctrl+C, launch again) before the next lesson to put them back. (After a restart, the scene in <code>move_group</code> has to be filled again: step 5.)</p>
+</li>
+</ol>
+
+<div class="callout"><strong class="t">What I did not see, and what I saw once</strong>
+<p>In B5 the answer <code>START_STATE_INVALID</code> was frequent. In the runs of C5 it did not come up. <strong>Do not rely on that</strong>: it comes from a continuous joint that ends past ±π, and B5's recipe (send the equivalent angle) would make a <em>real</em> joint turn a full circle in Gazebo, where it is not an instant relabelling as with the fake arm. Restart the simulation instead. Planning failures also vary from run to run: in one test, a descent that had worked in other runs printed <code>FAILURE</code> once; a second try worked. Ten descents in a row (0.55 to 0.47 and back) all succeeded in another test.</p></div>
+
+<h2>4. Check</h2>
+<ul>
+<li>T2 printed <code>You can start planning now!</code>, T3 got <code>SUCCESS</code> above the table, and <code>tf2_echo</code> agreed within a millimetre.</li>
+<li>The goal in the table was <code>FAILURE</code> while the scene had the table.</li>
+<li>The descent between the fingers' limits worked at z = 0.47 and failed at 0.45.</li>
+<li>Without the table in the scene, MoveIt said <code>SUCCESS</code> but the hand stopped at z = 0.447.</li>
+</ul>
+
+<h2>5. Exercise</h2>
+<p>From the results of step 6 and step 7, how far below <code>end_effector_link</code> do the fingers reach? And if you planned to grasp a block 5 cm tall lying on the table (centre at z = 0.325) with the fingertips at its centre, what hand height would you ask for, and would MoveIt allow it?</p>
+<details>
+<summary>Answer</summary>
+<p>MoveIt allowed 0.47 and refused 0.45, with the table top at 0.30: the fingers reach 0.15 to 0.17 m below the hand frame by MoveIt's collision model (the model is a little larger than the real fingers). In Gazebo, with no table in the scene, the fingers stopped on the table with the hand at z = 0.447 (0.443, 0.453 and 0.455 in other runs): 0.14 to 0.155 m. So the fingertips are about 0.14 to 0.15 m below the hand. For fingertips at the centre of the block (z = 0.325) you would want the hand at about 0.325 + 0.14 = 0.465 m, which is just at the edge of what MoveIt accepts (0.47 yes, 0.45 no), and that is why D2 uses the heights 0.47 and 0.55 for grasping and lifting.</p>
+</details>
+
+<h2>6. Recap</h2>
+<ul class="recap">
+<li>MoveIt drives the simulated arm through the same <code>FollowJointTrajectory</code> action, so B4's programs work unchanged. <code>move_group</code> needs <code>use_sim_time</code>.</li>
+<li>The planning scene is MoveIt's own: it does not read the Gazebo world. Copy the obstacles into it (here with <code>add_box</code>), or MoveIt plans through them.</li>
+<li><code>SUCCESS</code> from MoveIt does not mean the arm arrived: without the table in the scene, the arm stopped on the real table 13 cm above the goal (hand at z = 0.447, and 7 cm to the side).</li>
+<li>The fingers reach about 15 cm below <code>end_effector_link</code>; with a table at 0.30 the hand cannot go below about 0.46 m.</li>
+<li>The gripper is not driven through MoveIt (type mismatch); use the action of C2.</li>
+<li>Not tested: RViz with MoveIt and Gazebo, planning with an attached block, a real arm.</li>
+</ul>
+
+<nav class="pager">
+<a href="c4-sensors-and-state.html"><small>Previous</small>C4 · Sensors and state</a>
+<a class="next" href="d1-block-poses-to-towers.html"><small>Next</small>D1 · Block poses to towers</a>
+</nav>
+</main>
+<footer class="site"><p>Created by <a href="https://turgibot.com">Guy Tordjman aka Turgibot</a>. Text CC BY 4.0, code MIT. Source and issues: <a href="https://github.com/Turgibot/ros2-tutorial">github.com/Turgibot/ros2-tutorial</a></p></footer>
+<script src="assets/lesson.js"></script>
+</body>
+</html>
